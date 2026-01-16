@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import time
+import traceback
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,19 +34,20 @@ def health_check():
 
 @app.post("/scrape-match")
 async def scrape_match(payload: ScrapeRequest):
-    logger.info(f"Target URL: {payload.url}")
+    logger.info(f"--- Starting Scrape Request for: {payload.url} ---")
     
     # Validation
     if "espncricinfo.com" not in payload.url:
         raise HTTPException(status_code=400, detail="Invalid URL. Must be an ESPNCricinfo link.")
 
     # Clean URL to ensure we hit the scorecard
-    target_url = payload.url.split('?')[0] # Remove query params
+    target_url = payload.url.split('?')[0]
     if "full-scorecard" not in target_url:
         target_url = target_url.rstrip("/") + "/full-scorecard"
 
     try:
         # 1. Fetch Page
+        logger.info(f"Step 1: Fetching HTML from {target_url}...")
         resp = requests.get(
             target_url, 
             impersonate=payload.impersonate,
@@ -54,48 +56,70 @@ async def scrape_match(payload: ScrapeRequest):
         )
         
         if resp.status_code != 200:
-            logger.error(f"Cricinfo Error: {resp.status_code}")
+            logger.error(f"Step 1 Failed: Cricinfo returned status {resp.status_code}")
             raise HTTPException(status_code=resp.status_code, detail=f"Cricinfo returned {resp.status_code}")
+        
+        logger.info("Step 1 Success: HTML content retrieved.")
 
         # 2. Parse HTML
+        logger.info("Step 2: Searching for __NEXT_DATA__ script tag...")
         soup = BeautifulSoup(resp.text, 'html.parser')
         script_tag = soup.find('script', id='__NEXT_DATA__')
         
         if not script_tag:
-            logger.error("Failed to find __NEXT_DATA__")
+            logger.error("Step 2 Failed: __NEXT_DATA__ tag not found.")
             if "pardon our interruption" in resp.text.lower():
-                raise HTTPException(status_code=403, detail="Blocked by Cricinfo Bot Protection (Imperva)")
+                logger.error("Detection: Blocked by Imperva Bot Protection.")
+                raise HTTPException(status_code=403, detail="Blocked by Cricinfo Bot Protection")
             raise HTTPException(status_code=500, detail="JSON Data Tag not found on page")
+        
+        logger.info("Step 2 Success: Script tag found.")
 
         # 3. Process JSON
+        logger.info("Step 3: Loading JSON string...")
         data = json.loads(script_tag.string)
+        logger.info("Step 3 Success: JSON parsed successfully.")
         
-        # Access nested properties safely
+        # 4. Access Properties
+        logger.info("Step 4: Navigating JSON tree (props -> pageProps/appPageProps)...")
         props = data.get('props', {})
-        app_props = props.get('appPageProps') or props.get('pageProps') or {}
+        app_props = props.get('appPageProps') or props.get('pageProps')
         
-        # This is where the NoneType error likely occurred: app_props.get('data') returning None
-        data_wrapper = app_props.get('data') or {}
+        if app_props is None:
+            logger.error(f"Step 4 Failed: 'props' found but both 'appPageProps' and 'pageProps' are None. Available keys in props: {list(props.keys())}")
+            raise HTTPException(status_code=500, detail="Required page properties are missing from JSON.")
+        
+        logger.info(f"Step 4 Success: Found properties block (Keys: {list(app_props.keys())})")
+        
+        # 5. Access Data Wrapper
+        logger.info("Step 5: Accessing 'data' wrapper...")
+        data_wrapper = app_props.get('data')
+        if data_wrapper is None:
+            logger.error(f"Step 5 Failed: 'app_props' found but 'data' is None. Keys in app_props: {list(app_props.keys())}")
+            raise HTTPException(status_code=500, detail="Data wrapper is NoneType.")
+        
+        logger.info("Step 5 Success: Data wrapper retrieved.")
+
+        # 6. Content and Match extraction
         content = data_wrapper.get('content') or {}
         match_obj = data_wrapper.get('match') or {}
         
         if not match_obj:
-            logger.warning("Match object missing or empty in JSON")
-            # Log a snippet of the structure for debugging
-            logger.debug(f"Keys found in app_props: {list(app_props.keys())}")
-            raise HTTPException(status_code=404, detail="Match details not found in the page data. The link might be valid but the internal data structure changed.")
+            logger.warning("Step 6: Match object is empty.")
+            raise HTTPException(status_code=404, detail="Match details missing.")
+        
+        logger.info(f"Step 6 Success: Match extracted: {match_obj.get('title')}")
 
         # --- Extraction Logic ---
         m_state = (match_obj.get('state') or 'pre').lower()
         venue_obj = match_obj.get('ground') or {}
         teams_list = match_obj.get('teams') or []
         
-        # Safely identify teams
         home_team = next((t for t in teams_list if t.get('isHome')), teams_list[0] if teams_list else {})
         away_team = next((t for t in teams_list if not t.get('isHome')), teams_list[1] if len(teams_list) > 1 else {})
 
         # Build response payload
-        return {
+        response_data = {
             "success": True,
             "state": m_state,
             "meta": {
@@ -126,13 +150,15 @@ async def scrape_match(payload: ScrapeRequest):
                 "innings_2": format_innings(content.get('innings') or [], 1)
             }
         }
+        
+        logger.info("--- Final Response Constructed Successfully ---")
+        return response_data
 
     except json.JSONDecodeError:
+        logger.error("JSON Decode Error: Script tag content was not valid JSON.")
         raise HTTPException(status_code=500, detail="Failed to parse Cricinfo JSON payload")
     except Exception as e:
-        logger.error(f"Detailed Error: {str(e)}")
-        # If it's still a NoneType error, this will help pinpoint it
-        import traceback
+        logger.error(f"CRITICAL ERROR: {str(e)}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Scraper Error: {str(e)}")
 
@@ -140,7 +166,6 @@ def format_innings(innings_list, index):
     if not innings_list or len(innings_list) <= index: return None
     inn = innings_list[index] or {}
     
-    # Batting
     batting = []
     for b in inn.get('inningBatsmen') or []:
         if b and b.get('player'):
@@ -154,7 +179,6 @@ def format_innings(innings_list, index):
                 "sts": b.get('dismissalText', {}).get('long', 'not out')
             })
 
-    # Bowling
     bowling = [
         {
             "id": bo.get('player', {}).get('slug', 'unknown'),
