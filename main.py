@@ -36,7 +36,8 @@ class ScrapeRequest(BaseModel):
 def health_check():
     return {
         "status": "online", 
-        "version": "Cricko v7"
+        "version": "Cricko v8",
+        "message": "Cricinfo Advanced Scraper is live"
     }
 
 @app.post("/scrape-match")
@@ -201,7 +202,16 @@ def format_innings(innings_list, index):
             } for bo in inn.get('inningBowlers') or [] if bo and bo.get('player')
         ],
         "partnerships": [
-            {"r": p.get('runs', 0), "b": p.get('balls', 0), "p1": (p.get('player1') or {}).get('slug', 'p1'), "p2": (p.get('player2') or {}).get('slug', 'p2')}
+            {
+                "r": p.get('runs', 0), 
+                "b": p.get('balls', 0), 
+                "p1": (p.get('player1') or {}).get('slug', 'p1'), 
+                "p2": (p.get('player2') or {}).get('slug', 'p2'),
+                "p1r": p.get('player1Runs'),
+                "p1b": p.get('player1Balls'),
+                "p2r": p.get('player2Runs'),
+                "p2b": p.get('player2Balls')
+            }
             for p in inn.get('inningPartnerships') or [] if p
         ],
         "fow": [
