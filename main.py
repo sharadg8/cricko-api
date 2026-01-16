@@ -174,7 +174,7 @@ def format_innings(innings_list, index):
     
     batting = []
     for b in inn.get('inningBatsmen') or []:
-        if b and b.get('player'):
+        if b and b.get('player') and (b.get('runs') is not None or b.get('balls') is not None or b.get('isOut') or b.get('isBatting')):
             dismissal_obj = b.get('dismissalText') or {}
             batting.append({
                 "id": b.get('player', {}).get('slug', 'unknown'),
