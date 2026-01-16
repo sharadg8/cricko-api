@@ -30,11 +30,15 @@ class ScrapeRequest(BaseModel):
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "message": "Cricinfo Advanced Scraper is live"}
+    return {
+        "status": "online", 
+        "version": "Cricko v5",
+        "message": "Cricinfo Advanced Scraper is live"
+    }
 
 @app.post("/scrape-match")
 async def scrape_match(payload: ScrapeRequest):
-    logger.info(f"--- Starting Scrape Request for: {payload.url} ---")
+    logger.info(f"--- Starting Scrape Request [v5] for: {payload.url} ---")
     
     # Validation
     if "espncricinfo.com" not in payload.url:
@@ -121,6 +125,7 @@ async def scrape_match(payload: ScrapeRequest):
         # Build response payload
         response_data = {
             "success": True,
+            "version": "Cricko v5",
             "state": m_state,
             "meta": {
                 "date": match_obj.get('startTime'),
@@ -151,14 +156,14 @@ async def scrape_match(payload: ScrapeRequest):
             }
         }
         
-        logger.info("--- Final Response Constructed Successfully ---")
+        logger.info("--- Final Response Constructed Successfully [v5] ---")
         return response_data
 
     except json.JSONDecodeError:
         logger.error("JSON Decode Error: Script tag content was not valid JSON.")
         raise HTTPException(status_code=500, detail="Failed to parse Cricinfo JSON payload")
     except Exception as e:
-        logger.error(f"CRITICAL ERROR: {str(e)}")
+        logger.error(f"CRITICAL ERROR [v5]: {str(e)}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Scraper Error: {str(e)}")
 
@@ -169,6 +174,9 @@ def format_innings(innings_list, index):
     batting = []
     for b in inn.get('inningBatsmen') or []:
         if b and b.get('player'):
+            # Fix: Defensive check for dismissalText which can be None
+            dismissal_obj = b.get('dismissalText') or {}
+            
             batting.append({
                 "id": b.get('player', {}).get('slug', 'unknown'),
                 "r": b.get('runs', 0),
@@ -176,7 +184,7 @@ def format_innings(innings_list, index):
                 "r4": b.get('fours', 0),
                 "r6": b.get('sixes', 0),
                 "sr": b.get('strikerate', '0.00'),
-                "sts": b.get('dismissalText', {}).get('long', 'not out')
+                "sts": dismissal_obj.get('long', 'not out')
             })
 
     bowling = [
