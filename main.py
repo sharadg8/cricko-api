@@ -50,7 +50,7 @@ async def scrape_match(payload: ScrapeRequest):
             target_url, 
             impersonate=payload.impersonate,
             timeout=30,
-            verify=False # Sometimes helps with local/proxy issues
+            verify=False 
         )
         
         if resp.status_code != 200:
@@ -63,7 +63,6 @@ async def scrape_match(payload: ScrapeRequest):
         
         if not script_tag:
             logger.error("Failed to find __NEXT_DATA__")
-            # Fallback: check if we got a "Please enable JS" or "Blocked" page
             if "pardon our interruption" in resp.text.lower():
                 raise HTTPException(status_code=403, detail="Blocked by Cricinfo Bot Protection (Imperva)")
             raise HTTPException(status_code=500, detail="JSON Data Tag not found on page")
@@ -71,22 +70,25 @@ async def scrape_match(payload: ScrapeRequest):
         # 3. Process JSON
         data = json.loads(script_tag.string)
         
-        # Access nested properties safely using .get()
-        app_props = data.get('props', {}).get('appPageProps', {})
-        if not app_props:
-            app_props = data.get('props', {}).get('pageProps', {}) # Alternative path
-            
-        content = app_props.get('data', {}).get('content', {})
-        match_obj = app_props.get('data', {}).get('match', {})
+        # Access nested properties safely
+        props = data.get('props', {})
+        app_props = props.get('appPageProps') or props.get('pageProps') or {}
+        
+        # This is where the NoneType error likely occurred: app_props.get('data') returning None
+        data_wrapper = app_props.get('data') or {}
+        content = data_wrapper.get('content') or {}
+        match_obj = data_wrapper.get('match') or {}
         
         if not match_obj:
-            logger.warning("Match object missing in JSON")
-            raise HTTPException(status_code=404, detail="Match details not found in data payload")
+            logger.warning("Match object missing or empty in JSON")
+            # Log a snippet of the structure for debugging
+            logger.debug(f"Keys found in app_props: {list(app_props.keys())}")
+            raise HTTPException(status_code=404, detail="Match details not found in the page data. The link might be valid but the internal data structure changed.")
 
         # --- Extraction Logic ---
         m_state = (match_obj.get('state') or 'pre').lower()
-        venue_obj = match_obj.get('ground', {})
-        teams_list = match_obj.get('teams', [])
+        venue_obj = match_obj.get('ground') or {}
+        teams_list = match_obj.get('teams') or []
         
         # Safely identify teams
         home_team = next((t for t in teams_list if t.get('isHome')), teams_list[0] if teams_list else {})
@@ -111,17 +113,17 @@ async def scrape_match(payload: ScrapeRequest):
             },
             "pre": {
                 "officials": {
-                    "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires', [])]
+                    "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires') or []]
                 },
                 "toss": {
                     "choice": "bat" if match_obj.get('tossWinnerChoice') == 1 else "bowl",
-                    "win": next((t["team"]["abbreviation"] for t in match_obj.get("teams", []) if t["team"].get("id") == match_obj.get('tossWinnerTeamId')), "N/A")
+                    "win": next((t.get("team", {}).get("abbreviation") for t in (match_obj.get("teams") or []) if t.get("team", {}).get("id") == match_obj.get('tossWinnerTeamId')), "N/A")
                 }
             },
             "post": {
                 "result": {"result": match_obj.get('statusText')},
-                "innings_1": format_innings(content.get('innings', []), 0),
-                "innings_2": format_innings(content.get('innings', []), 1)
+                "innings_1": format_innings(content.get('innings') or [], 0),
+                "innings_2": format_innings(content.get('innings') or [], 1)
             }
         }
 
@@ -129,16 +131,19 @@ async def scrape_match(payload: ScrapeRequest):
         raise HTTPException(status_code=500, detail="Failed to parse Cricinfo JSON payload")
     except Exception as e:
         logger.error(f"Detailed Error: {str(e)}")
+        # If it's still a NoneType error, this will help pinpoint it
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Scraper Error: {str(e)}")
 
 def format_innings(innings_list, index):
-    if len(innings_list) <= index: return None
-    inn = innings_list[index]
+    if not innings_list or len(innings_list) <= index: return None
+    inn = innings_list[index] or {}
     
     # Batting
     batting = []
-    for b in inn.get('inningBatsmen', []):
-        if b.get('player'):
+    for b in inn.get('inningBatsmen') or []:
+        if b and b.get('player'):
             batting.append({
                 "id": b.get('player', {}).get('slug', 'unknown'),
                 "r": b.get('runs', 0),
@@ -159,11 +164,11 @@ def format_innings(innings_list, index):
             "w": bo.get('wickets', 0),
             "econ": bo.get('economy', '0.00'),
             "r0": bo.get('dots', 0)
-        } for bo in inn.get('inningBowlers', []) if bo.get('player')
+        } for bo in inn.get('inningBowlers') or [] if bo and bo.get('player')
     ]
 
     return {
-        "team": inn.get('team', {}).get('abbreviation', 'UNK'),
+        "team": (inn.get('team') or {}).get('abbreviation', 'UNK'),
         "total": f"{inn.get('runs', 0)}/{inn.get('wickets', 0)}",
         "overs": inn.get('overs', 0),
         "batting": batting,
@@ -172,16 +177,16 @@ def format_innings(innings_list, index):
             {
                 "r": p.get('runs', 0),
                 "b": p.get('balls', 0),
-                "p1": p.get('player1', {}).get('slug', 'p1'),
-                "p2": p.get('player2', {}).get('slug', 'p2')
-            } for p in inn.get('inningPartnerships', [])
+                "p1": (p.get('player1') or {}).get('slug', 'p1'),
+                "p2": (p.get('player2') or {}).get('slug', 'p2')
+            } for p in inn.get('inningPartnerships') or [] if p
         ],
         "fow": [
             {
-                "id": f.get('player', {}).get('slug', 'p'),
+                "id": (f.get('player') or {}).get('slug', 'p'),
                 "over": f.get('fowOvers', 0),
                 "score": f"{f.get('fowRuns', 0)}/{f.get('fowWicketNum', 0)}"
-            } for f in inn.get('inningWickets', [])
+            } for f in inn.get('inningWickets') or [] if f
         ]
     }
 
