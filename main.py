@@ -41,7 +41,7 @@ def health_check():
     return {
         "status": "online",
         "timestamp": datetime.now().isoformat(),
-        "message": "Cricinfo Advanced Scraper is live"
+        "message": "Cricko is live"
     }
 
 @app.post("/scrape-match")
