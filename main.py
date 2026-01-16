@@ -24,6 +24,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Simple in-memory cache: { "url": {"expiry": timestamp, "data": result} }
+CACHE = {}
+CACHE_TTL = 60  # Cache duration in seconds (1 minute)
+
 class ScrapeRequest(BaseModel):
     url: str
     impersonate: str = "chrome120"
@@ -32,22 +36,32 @@ class ScrapeRequest(BaseModel):
 def health_check():
     return {
         "status": "online", 
-        "version": "Cricko v5",
-        "message": "Cricinfo Advanced Scraper is live"
+        "version": "Cricko v6"
     }
 
 @app.post("/scrape-match")
 async def scrape_match(payload: ScrapeRequest):
+    # Clean URL to ensure we hit the scorecard
+    target_url = payload.url.split('?')[0]
+    if "full-scorecard" not in target_url:
+        target_url = target_url.rstrip("/") + "/full-scorecard"
+
+    # Check Cache
+    now = time.time()
+    if target_url in CACHE:
+        cached_item = CACHE[target_url]
+        if now < cached_item['expiry']:
+            logger.info(f"--- Cache Hit for: {target_url} ---")
+            return cached_item['data']
+        else:
+            logger.info(f"--- Cache Expired for: {target_url} ---")
+            del CACHE[target_url]
+
     logger.info(f"--- Starting Scrape Request [v5] for: {payload.url} ---")
     
     # Validation
     if "espncricinfo.com" not in payload.url:
         raise HTTPException(status_code=400, detail="Invalid URL. Must be an ESPNCricinfo link.")
-
-    # Clean URL to ensure we hit the scorecard
-    target_url = payload.url.split('?')[0]
-    if "full-scorecard" not in target_url:
-        target_url = target_url.rstrip("/") + "/full-scorecard"
 
     try:
         # 1. Fetch Page
@@ -154,6 +168,12 @@ async def scrape_match(payload: ScrapeRequest):
                 "innings_1": format_innings(content.get('innings') or [], 0),
                 "innings_2": format_innings(content.get('innings') or [], 1)
             }
+        }
+        
+        # Save to Cache
+        CACHE[target_url] = {
+            "expiry": time.time() + CACHE_TTL,
+            "data": response_data
         }
         
         logger.info("--- Final Response Constructed Successfully [v5] ---")
