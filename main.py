@@ -36,8 +36,7 @@ class ScrapeRequest(BaseModel):
 def health_check():
     return {
         "status": "online", 
-        "version": "Cricko v8",
-        "message": "Cricinfo Advanced Scraper is live"
+        "version": "Cricko v8"
     }
 
 @app.post("/scrape-match")
