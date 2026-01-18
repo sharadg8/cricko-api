@@ -54,7 +54,7 @@ async def scrape_match(payload: ScrapeRequest):
             logger.info(f"--- Cache Hit for: {target_url} ---")
             return cached_item['data']
 
-    logger.info(f"--- Starting Scrape Request [v5] for: {payload.url} ---")
+    logger.info(f"--- Starting Scrape Request [v5.2] for: {payload.url} ---")
     
     if "espncricinfo.com" not in payload.url:
         raise HTTPException(status_code=400, detail="Invalid URL. Must be an ESPNCricinfo link.")
@@ -120,10 +120,38 @@ async def scrape_match(payload: ScrapeRequest):
         awards = content.get('matchPlayerAwards', [])
         pom_slug = next((a.get('player', {}).get('slug', "") for a in awards if a.get('type') == "PLAYER_OF_MATCH"), "")
 
+        # --- EXTRACT LIVE DATA ---
+        live_data = {}
+        if m_state == "live":
+            lp = match_obj.get('livePerformance', {})
+            live_data = {
+                "batting": [
+                    {
+                        "id": b.get('player', {}).get('slug'),
+                        "r": b.get('runs'),
+                        "b": b.get('balls'),
+                        "r4": b.get('fours'),
+                        "r6": b.get('sixes'),
+                        "sr": b.get('strikerate'),
+                        "is_striker": b.get('isStriker', False)
+                    } for b in lp.get('batsmen', []) if b.get('player')
+                ],
+                "bowling": [
+                    {
+                        "id": bo.get('player', {}).get('slug'),
+                        "o": bo.get('overs'),
+                        "r": bo.get('conceded'),
+                        "w": bo.get('wickets'),
+                        "econ": bo.get('economy'),
+                        "r0": bo.get('dots')
+                    } for bo in lp.get('bowlers', []) if bo.get('player')
+                ]
+            }
+
         response_data = {
-            "success": True,
-            "version": "Cricko v5",
+            "version": "Cricko v5.2",
             "state": m_state,
+            "live": live_data,
             "meta": {
                 "date": match_obj.get('startTime'),
                 "info": match_obj.get('title'),
@@ -164,7 +192,8 @@ async def scrape_match(payload: ScrapeRequest):
         return response_data
 
     except Exception as e:
-        logger.error(f"CRITICAL ERROR [v5]: {str(e)}")
+        logger.error(f"CRITICAL ERROR [v5.2]: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Scraper Error: {str(e)}")
 
 def format_innings(innings_list, index):
