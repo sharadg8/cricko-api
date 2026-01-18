@@ -197,6 +197,11 @@ def format_innings(innings_list, index):
                 "m": bo.get('maidens', 0),
                 "r": bo.get('conceded', 0),
                 "w": bo.get('wickets', 0),
+                "r0": bo.get('dots', 0),
+                "r4": bo.get('fours', 0),
+                "r6": bo.get('sixes', 0),
+                "wd": bo.get('wides', 0),
+                "nb": bo.get('noballs', 0),
                 "econ": bo.get('economy', '0.00')
             } for bo in inn.get('inningBowlers') or [] if bo and bo.get('player')
         ],
@@ -216,7 +221,14 @@ def format_innings(innings_list, index):
         "fow": [
             {"id": (f.get('player') or {}).get('slug', 'p'), "over": f.get('fowOvers', 0), "score": f"{f.get('fowRuns', 0)}/{f.get('fowWicketNum', 0)}"}
             for f in inn.get('inningWickets') or [] if f
-        ]
+        ],
+        "extras": {
+            "b": inn.get('byes', 0),
+            "lb": inn.get('legbyes', 0),
+            "wd": inn.get('wides', 0),
+            "nb": inn.get('noballs', 0),
+            "tot": inn.get('extras', 0)
+        }
     }
 
 if __name__ == "__main__":
