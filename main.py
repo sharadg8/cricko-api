@@ -17,10 +17,19 @@ logger = logging.getLogger("cric-scraper")
 
 app = FastAPI()
 
+# --- SECURITY: ALLOWED ORIGINS ---
+# Replace these with your actual production domains (e.g., https://your-app.vercel.app)
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",          # For local React development
+    "http://127.0.0.1:5173",
+    "https://cricko.web.app/" # Your actual frontend domain
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,    # Restricted to specific sites
+    allow_credentials=True,
+    allow_methods=["POST", "GET"],    # Limit to required methods
     allow_headers=["*"],
 )
 
@@ -265,7 +274,8 @@ async def scrape_match(payload: ScrapeRequest):
             live_data["bowling"] = [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
 
         result_data = {
-            "state": m_state, "live": live_data,
+            "state": m_state, 
+            "live": live_data,
             "meta": {"date": match_obj.get('startTime'), "info": match_obj.get('title'), "teams": {"home": {"abbr": home_team.get('team', {}).get('abbreviation'), "name": home_team.get('team', {}).get('longName')}, "away": {"abbr": away_team.get('team', {}).get('abbreviation'), "name": away_team.get('team', {}).get('longName')}}, "venue": {"cc": venue_obj.get('country', {}).get('name'), "city": venue_obj.get('town', {}).get('name'), "name": venue_obj.get('name')}},
             "pre": {"officials": {"match_referee": [u.get('player', {}).get('longName') for u in match_obj.get('matchReferees') or []], "tv_umpire": [u.get('player', {}).get('longName') for u in match_obj.get('tvUmpires') or []], "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires') or []]}, "squads": squads, "toss": {"choice": "bat" if match_obj.get('tossWinnerChoice') == 1 else "bowl", "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('tossWinnerTeamId')), "N/A")}},
             "post": {"result": {"result": match_obj.get('statusText'), "pom": next((a.get('player', {}).get('slug', "") for a in content.get('matchPlayerAwards', []) if a.get('type') == "PLAYER_OF_MATCH"), ""), "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('winnerTeamId')), None)}, "innings_1": format_innings(content.get('innings') or [], 0), "innings_2": format_innings(content.get('innings') or [], 1)}
