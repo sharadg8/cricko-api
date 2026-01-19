@@ -100,7 +100,7 @@ def format_innings(innings_list, index):
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "version": "Cricko v8.6"}
+    return {"status": "online", "version": "Cricko v0.8"}
 
 @app.post("/schedule")
 async def scrape_schedule(payload: ScrapeRequest):
@@ -144,7 +144,11 @@ async def scrape_schedule(payload: ScrapeRequest):
             if containers:
                 matches_list = containers[0].get('matches', [])
 
-        formatted_schedule = {}
+        formatted_schedule = {
+            "version": "Cricko v0.8",
+            "matches": {}
+        }
+        
         for idx, match in enumerate(matches_list, 1):
             mid = f"{series_prefix}-{str(idx).zfill(3)}" if series_prefix else str(idx).zfill(3)
             
@@ -179,7 +183,7 @@ async def scrape_schedule(payload: ScrapeRequest):
                     "win": next((t["team"]["abbreviation"] for t in match.get("teams", []) if str(t.get("team", {}).get("id")) == str(match.get('winnerTeamId'))), None)
                 }
             
-            formatted_schedule[mid] = entry
+            formatted_schedule["matches"][mid] = entry
 
         CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 5), "data": formatted_schedule}
         return formatted_schedule
@@ -189,7 +193,6 @@ async def scrape_schedule(payload: ScrapeRequest):
 
 @app.post("/match")
 async def scrape_match(payload: ScrapeRequest):
-    # Ensure URL is pointing to scorecard
     target_url = payload.url.split('?')[0]
     if "full-scorecard" not in target_url:
         target_url = target_url.rstrip("/") + "/full-scorecard"
@@ -224,10 +227,14 @@ async def scrape_match(payload: ScrapeRequest):
         
         home_team = next((t for t in teams_list if t.get('isHome')), teams_list[0] if teams_list else {})
         away_team = next((t for t in teams_list if not t.get('isHome')), teams_list[1] if len(teams_list) > 1 else {})
+        
+        home_abbr = home_team.get('team', {}).get('abbreviation', 'HOME')
+        away_abbr = away_team.get('team', {}).get('abbreviation', 'AWAY')
 
-        # Squads
+        # Reverted Squads to use Team IDs as keys
         squads = {}
         teams_players = content.get('matchPlayers', {}).get('teamPlayers', [])
+        
         for tp in teams_players:
             t_abbr = tp.get('team', {}).get('abbreviation', 'UNK')
             squads[t_abbr] = {}
@@ -247,25 +254,25 @@ async def scrape_match(payload: ScrapeRequest):
         awards = content.get('matchPlayerAwards', [])
         pom_slug = next((a.get('player', {}).get('slug', "") for a in awards if a.get('type') == "PLAYER_OF_MATCH"), "")
 
-        # Live Data
-        live_data = {}
+        # Live Data - Check if performance exists regardless of state
         lp = match_obj.get('livePerformance', {})
-        if lp:
+        live_data = {}
+        if lp and (lp.get('batsmen') or lp.get('bowlers')):
             live_data = {
                 "batting": [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')],
                 "bowling": [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
             }
 
         response_data = {
-            "version": "Cricko v8.6",
+            "version": "Cricko v0.8",
             "state": m_state,
             "live": live_data,
             "meta": {
                 "date": match_obj.get('startTime'),
                 "info": match_obj.get('title'),
                 "teams": {
-                    "home": {"abbr": home_team.get('team', {}).get('abbreviation'), "name": home_team.get('team', {}).get('longName')},
-                    "away": {"abbr": away_team.get('team', {}).get('abbreviation'), "name": away_team.get('team', {}).get('longName')}
+                    "home": {"abbr": home_abbr, "name": home_team.get('team', {}).get('longName')},
+                    "away": {"abbr": away_abbr, "name": away_team.get('team', {}).get('longName')}
                 },
                 "venue": {"cc": venue_obj.get('country', {}).get('name'), "city": venue_obj.get('town', {}).get('name'), "name": venue_obj.get('name')}
             },
