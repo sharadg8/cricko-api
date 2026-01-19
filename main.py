@@ -35,9 +35,115 @@ class ScrapeRequest(BaseModel):
 @app.get("/")
 def health_check():
     return {
-        "status": "online", 
-        "version": "Cricko v8"
+        "status": "online",
+        "version": "Cricko v8.2"
     }
+
+@app.post("/scrape-schedule")
+async def scrape_schedule(payload: ScrapeRequest):
+    """
+    Scrapes the match schedule and formats it into the requested specific structure.
+    """
+    target_url = payload.url.split('?')[0]
+    
+    # Check Cache
+    now = time.time()
+    if target_url in CACHE:
+        cached_item = CACHE[target_url]
+        if now < cached_item['expiry']:
+            logger.info(f"--- Cache Hit (Schedule) for: {target_url} ---")
+            return cached_item['data']
+
+    logger.info(f"--- Starting Schedule Scrape for: {target_url} ---")
+    
+    if "espncricinfo.com" not in target_url:
+        raise HTTPException(status_code=400, detail="Invalid URL. Must be an ESPNCricinfo link.")
+
+    try:
+        resp = requests.get(
+            target_url, 
+            impersonate=payload.impersonate,
+            timeout=30,
+            verify=False 
+        )
+        
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=f"Cricinfo returned {resp.status_code}")
+
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        script_tag = soup.find('script', id='__NEXT_DATA__')
+        
+        if not script_tag:
+            raise HTTPException(status_code=500, detail="JSON Data Tag not found on page")
+
+        data = json.loads(script_tag.string)
+        props = data.get('props', {})
+        app_props = props.get('appPageProps') or props.get('pageProps')
+        
+        raw_data = app_props.get('data', {})
+        content = raw_data.get('content', {})
+        
+        # Determine series prefix for IDs (e.g., "2026-t20wc")
+        series_info = raw_data.get('series', {})
+        series_slug = series_info.get('slug', 'match')
+        # Clean slug to create a prefix
+        series_prefix = "-".join(series_slug.split('-')[:3])
+        
+        # Determine match source
+        matches_list = content.get('matches') or content.get('seriesMatches', {}).get('matches')
+        if not matches_list and content.get('schedule'):
+             matches_list = content.get('schedule', {}).get('containers', [{}])[0].get('matches')
+        
+        # Fallback to initial state if available
+        if not matches_list:
+            matches_list = app_props.get('initialState', {}).get('content', {}).get('matches', [])
+
+        formatted_schedule = {}
+        for idx, match in enumerate(matches_list, 1):
+            mid = f"{series_prefix}-{str(idx).zfill(3)}"
+            teams = match.get('teams') or []
+            
+            # Identify Home/Away (defaulting to order if isHome is missing)
+            t1 = teams[0] if len(teams) > 0 else {}
+            t2 = teams[1] if len(teams) > 1 else {}
+            home = t1 if t1.get('isHome') else (t2 if t2.get('isHome') else t1)
+            away = t2 if home == t1 else t1
+            
+            status = (match.get('state') or '').lower()
+            ground = match.get('ground') or {}
+            
+            entry = {
+                "ci": f"{match.get('slug', '')}-{match.get('objectId', '')}",
+                "date": match.get('startTime'),
+                "info": match.get('title'),
+                "num": idx,
+                "state": status,
+                "teams": {
+                    "away": {"abbr": (away.get('team') or {}).get('abbreviation', ''), "name": (away.get('team') or {}).get('longName', 'TBC')},
+                    "home": {"abbr": (home.get('team') or {}).get('abbreviation', ''), "name": (home.get('team') or {}).get('longName', 'TBC')}
+                },
+                "venue": {"cc": ground.get('country', {}).get('name', ''), "city": ground.get('town', {}).get('name', ''), "name": ground.get('name', 'TBA')}
+            }
+
+            if status == "post":
+                # Robust helper to extract numerical over count or default to "20"
+                parse_scoreinfo = lambda s: "20" if not s else (str(s).split()[0].split("/")[0])
+                entry["result"] = {
+                    "away": {"overs": parse_scoreinfo(away.get('scoreInfo', '0')), "total": away.get('score', '0/0')},
+                    "home": {"overs": parse_scoreinfo(home.get('scoreInfo', '0')), "total": home.get('score', '0/0')},
+                    "result": match.get('statusText', ''),
+                    "win": next((t["team"]["abbreviation"] for t in match.get("teams", []) if t.get("team", {}).get("id") == match.get('winnerTeamId', 0)), None)
+                }
+            
+            formatted_schedule[mid] = entry
+
+        CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 5), "data": formatted_schedule}
+        return formatted_schedule
+
+    except Exception as e:
+        logger.error(f"SCHEDULE ERROR: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Schedule Scraper Error: {str(e)}")
 
 @app.post("/scrape-match")
 async def scrape_match(payload: ScrapeRequest):
@@ -97,7 +203,7 @@ async def scrape_match(payload: ScrapeRequest):
         home_team = next((t for t in teams_list if t.get('isHome')), teams_list[0] if teams_list else {})
         away_team = next((t for t in teams_list if not t.get('isHome')), teams_list[1] if len(teams_list) > 1 else {})
 
-        # --- EXTRACT SQUADS (PRE-DATA) ---
+        # --- EXTRACT SQUADS ---
         squads = {}
         teams_players = content.get('matchPlayers', {}).get('teamPlayers', [])
         for tp in teams_players:
@@ -116,7 +222,7 @@ async def scrape_match(payload: ScrapeRequest):
                         "role": f"[{p.get('playerRoleType', {})}] {role_str}"
                     }
 
-        # --- EXTRACT POM (POST-DATA) ---
+        # --- EXTRACT POM ---
         awards = content.get('matchPlayerAwards', [])
         pom_slug = next((a.get('player', {}).get('slug', "") for a in awards if a.get('type') == "PLAYER_OF_MATCH"), "")
 
