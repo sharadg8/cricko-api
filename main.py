@@ -27,10 +27,59 @@ app.add_middleware(
 CACHE = {}
 CACHE_TTL = 60 
 
+# Local lookup for abbreviations and colors (HTML hex)
+TEAM_META = {
+    # International Teams
+    "India": {"abbr": "IND", "color": "#004ba0"},
+    "Australia": {"abbr": "AUS", "color": "#ffcd00"},
+    "England": {"abbr": "ENG", "color": "#00285e"},
+    "South Africa": {"abbr": "SA", "color": "#007a33"},
+    "Pakistan": {"abbr": "PAK", "color": "#006629"},
+    "New Zealand": {"abbr": "NZ", "color": "#000000"},
+    "West Indies": {"abbr": "WI", "color": "#7b0031"},
+    "Sri Lanka": {"abbr": "SL", "color": "#002080"},
+    "Afghanistan": {"abbr": "AFG", "color": "#0000ff"},
+    "Bangladesh": {"abbr": "BAN", "color": "#006a4e"},
+    "Ireland": {"abbr": "IRE", "color": "#16a04a"},
+    "Scotland": {"abbr": "SCO", "color": "#004b8d"},
+    "Netherlands": {"abbr": "NED", "color": "#f36c21"},
+    "Namibia": {"abbr": "NAM", "color": "#0035ad"},
+    "United States of America": {"abbr": "USA", "color": "#002868"},
+    "Canada": {"abbr": "CAN", "color": "#ff0000"},
+    "Nepal": {"abbr": "NEP", "color": "#dc143c"},
+    "Oman": {"abbr": "OMA", "color": "#ff0000"},
+    "Papua New Guinea": {"abbr": "PNG", "color": "#000000"},
+    "Uganda": {"abbr": "UGA", "color": "#fcdc04"},
+    "United Arab Emirates": {"abbr": "UAE", "color": "#00732f"},
+    "Zimbabwe": {"abbr": "ZIM", "color": "#ef3340"},
+    "P.N.G.": {"abbr": "PNG", "color": "#000000"},
+    "U.S.A.": {"abbr": "USA", "color": "#002868"},
+    "U.A.E.": {"abbr": "UAE", "color": "#00732f"},
+    
+    # IPL Teams
+    "Mumbai Indians": {"abbr": "MI", "color": "#004ba0"},
+    "Chennai Super Kings": {"abbr": "CSK", "color": "#ffff00"},
+    "Royal Challengers Bengaluru": {"abbr": "RCB", "color": "#2b2a29"},
+    "Royal Challengers Bangalore": {"abbr": "RCB", "color": "#2b2a29"},
+    "Kolkata Knight Riders": {"abbr": "KKR", "color": "#3a225d"},
+    "Delhi Capitals": {"abbr": "DC", "color": "#00008b"},
+    "Rajasthan Royals": {"abbr": "RR", "color": "#ea1a85"},
+    "Punjab Kings": {"abbr": "PBKS", "color": "#dd1f2d"},
+    "Kings XI": {"abbr": "KXIP", "color": "#dd1f2d"},
+    "Sunrisers Hyderabad": {"abbr": "SRH", "color": "#ff822a"},
+    "Gujarat Titans": {"abbr": "GT", "color": "#1b2133"},
+    "Guj Lions": {"abbr": "GL", "color": "#1b2133"},
+    "Lucknow Super Giants": {"abbr": "LSG", "color": "#0057e2"},
+    "Daredevils": {"abbr": "DD", "color": "#00008b"},
+    "Delhi": {"abbr": "DD", "color": "#00008b"},
+    "Supergiant": {"abbr": "RPS", "color": "#ff00ff"},
+    "Supergiants": {"abbr": "RPS", "color": "#ff00ff"}
+}
+
 class ScrapeRequest(BaseModel):
     url: str
     impersonate: str = "chrome120"
-    series_prefix: str = "" # Optional input for custom ID prefix
+    series_prefix: str = ""
 
 def format_innings(innings_list, index):
     """Helper to format individual innings data for scorecards."""
@@ -98,6 +147,17 @@ def format_innings(innings_list, index):
         }
     }
 
+async def fetch_json(url, impersonate="chrome120"):
+    """Generic fetch for __NEXT_DATA__ JSON from Cricinfo."""
+    try:
+        resp = requests.get(url, impersonate=impersonate, timeout=30, verify=False)
+        if resp.status_code != 200: return None
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        script_tag = soup.find('script', id='__NEXT_DATA__')
+        return json.loads(script_tag.string) if script_tag else None
+    except Exception:
+        return None
+
 @app.get("/")
 def health_check():
     return {"status": "online", "version": "Cricko v0.8"}
@@ -105,24 +165,14 @@ def health_check():
 @app.post("/schedule")
 async def scrape_schedule(payload: ScrapeRequest):
     target_url = payload.url.split('?')[0]
-    
     if target_url in CACHE:
-        cached_item = CACHE[target_url]
-        if time.time() < cached_item['expiry']:
-            return cached_item['data']
+        if time.time() < CACHE[target_url]['expiry']: return CACHE[target_url]['data']
+
+    raw_json = await fetch_json(target_url, payload.impersonate)
+    if not raw_json: raise HTTPException(status_code=500, detail="Failed to fetch data")
 
     try:
-        resp = requests.get(target_url, impersonate=payload.impersonate, timeout=30, verify=False)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Cricinfo unreachable")
-
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        script_tag = soup.find('script', id='__NEXT_DATA__')
-        if not script_tag:
-            raise HTTPException(status_code=500, detail="Data tag missing")
-
-        data = json.loads(script_tag.string)
-        app_props = data.get('props', {}).get('appPageProps') or data.get('props', {}).get('pageProps', {})
+        app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('props', {}).get('pageProps', {})
         data_content = app_props.get('data', {}).get('content', {})
         
         series_prefix = payload.series_prefix
@@ -132,8 +182,6 @@ async def scrape_schedule(payload: ScrapeRequest):
             if series_slug:
                 slug_parts = [p for p in series_slug.split('-') if p not in ['men', 's', 'women']]
                 series_prefix = "-".join(slug_parts[:3])
-            else:
-                series_prefix = ""
 
         matches_list = data_content.get('matches', []) or \
                        data_content.get('seriesMatches', {}).get('matches', []) or \
@@ -141,23 +189,16 @@ async def scrape_schedule(payload: ScrapeRequest):
         
         if not matches_list:
             containers = data_content.get('schedule', {}).get('containers', [])
-            if containers:
-                matches_list = containers[0].get('matches', [])
+            if containers: matches_list = containers[0].get('matches', [])
 
-        formatted_schedule = {
-            "version": "Cricko v0.8",
-            "matches": {}
-        }
+        formatted_schedule = {"version": "Cricko v0.8", "matches": {}}
         
         for idx, match in enumerate(matches_list, 1):
             mid = f"{series_prefix}-{str(idx).zfill(3)}" if series_prefix else str(idx).zfill(3)
-            
             teams = match.get('teams') or []
-            t1 = teams[0] if len(teams) > 0 else {}
-            t2 = teams[1] if len(teams) > 1 else {}
+            t1, t2 = (teams[0] if len(teams) > 0 else {}), (teams[1] if len(teams) > 1 else {})
             home = t1 if t1.get('isHome') else (t2 if t2.get('isHome') else t1)
             away = t2 if home == t1 else t1
-            
             status = (match.get('state') or '').lower()
             ground = match.get('ground') or {}
             
@@ -175,14 +216,13 @@ async def scrape_schedule(payload: ScrapeRequest):
             }
 
             if status == "post":
-                parse_scoreinfo = lambda s: "20" if not s else (str(s).split()[0].split("/")[0])
+                parse_overs = lambda s: "20" if not s else (str(s).split()[0].split("/")[0])
                 entry["result"] = {
-                    "away": {"overs": parse_scoreinfo(away.get('scoreInfo')), "total": away.get('score', '0/0')},
-                    "home": {"overs": parse_scoreinfo(home.get('scoreInfo')), "total": home.get('score', '0/0')},
+                    "away": {"overs": parse_overs(away.get('scoreInfo')), "total": away.get('score', '0/0')},
+                    "home": {"overs": parse_overs(home.get('scoreInfo')), "total": home.get('score', '0/0')},
                     "result": match.get('statusText', ''),
                     "win": next((t["team"]["abbreviation"] for t in match.get("teams", []) if str(t.get("team", {}).get("id")) == str(match.get('winnerTeamId'))), None)
                 }
-            
             formatted_schedule["matches"][mid] = entry
 
         CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 5), "data": formatted_schedule}
@@ -194,116 +234,120 @@ async def scrape_schedule(payload: ScrapeRequest):
 @app.post("/match")
 async def scrape_match(payload: ScrapeRequest):
     target_url = payload.url.split('?')[0]
-    if "full-scorecard" not in target_url:
-        target_url = target_url.rstrip("/") + "/full-scorecard"
-
+    if "full-scorecard" not in target_url: target_url = target_url.rstrip("/") + "/full-scorecard"
     if target_url in CACHE:
-        cached_item = CACHE[target_url]
-        if time.time() < cached_item['expiry']:
-            return cached_item['data']
+        if time.time() < CACHE[target_url]['expiry']: return CACHE[target_url]['data']
+
+    raw_json = await fetch_json(target_url, payload.impersonate)
+    if not raw_json: raise HTTPException(status_code=500, detail="Failed to fetch scorecard")
 
     try:
-        resp = requests.get(target_url, impersonate=payload.impersonate, timeout=30, verify=False)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Cricinfo unreachable")
-
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        script_tag = soup.find('script', id='__NEXT_DATA__')
-        if not script_tag:
-            raise HTTPException(status_code=500, detail="Data tag missing")
-
-        data = json.loads(script_tag.string)
-        app_props = data.get('props', {}).get('appPageProps') or data.get('props', {}).get('pageProps', {})
+        app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('props', {}).get('pageProps', {})
         data_wrapper = app_props.get('data', {})
         content = data_wrapper.get('content', {})
         match_obj = data_wrapper.get('match', {})
         
-        if not match_obj:
-            raise HTTPException(status_code=404, detail="Match details missing.")
-
         m_state = (match_obj.get('state') or 'pre').lower()
         venue_obj = match_obj.get('ground') or {}
         teams_list = match_obj.get('teams') or []
-        
         home_team = next((t for t in teams_list if t.get('isHome')), teams_list[0] if teams_list else {})
         away_team = next((t for t in teams_list if not t.get('isHome')), teams_list[1] if len(teams_list) > 1 else {})
         
-        home_abbr = home_team.get('team', {}).get('abbreviation', 'HOME')
-        away_abbr = away_team.get('team', {}).get('abbreviation', 'AWAY')
-
-        # Reverted Squads to use Team IDs as keys
         squads = {}
-        teams_players = content.get('matchPlayers', {}).get('teamPlayers', [])
-        
-        for tp in teams_players:
+        for tp in content.get('matchPlayers', {}).get('teamPlayers', []):
             t_abbr = tp.get('team', {}).get('abbreviation', 'UNK')
-            squads[t_abbr] = {}
-            for p in tp.get('players', []):
-                p_obj = p.get('player', {})
-                p_slug = p_obj.get('slug')
-                if p_slug:
-                    roles = p_obj.get('playingRoles', [])
-                    role_str = ", ".join(roles) if isinstance(roles, list) else str(roles)
-                    squads[t_abbr][p_slug] = {
-                        "name": p_obj.get('longName'),
-                        "slug": p_slug,
-                        "role": f"[{p.get('playerRoleType', {})}] {role_str}"
-                    }
+            squads[t_abbr] = {p.get('player', {}).get('slug'): {"name": p.get('player', {}).get('longName'), "slug": p.get('player', {}).get('slug'), "role": f"[{p.get('playerRoleType', {})}] {', '.join(p.get('player', {}).get('playingRoles', []))}"} for p in tp.get('players', []) if p.get('player', {}).get('slug')}
 
-        # POM
-        awards = content.get('matchPlayerAwards', [])
-        pom_slug = next((a.get('player', {}).get('slug', "") for a in awards if a.get('type') == "PLAYER_OF_MATCH"), "")
-
-        # Live Data - Check if performance exists regardless of state
         lp = match_obj.get('livePerformance', {})
-        live_data = {}
-        if lp and (lp.get('batsmen') or lp.get('bowlers')):
-            live_data = {
-                "batting": [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')],
-                "bowling": [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
-            }
+        live_data = {"batting": [], "bowling": []}
+        if lp:
+            live_data["batting"] = [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')]
+            live_data["bowling"] = [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
 
-        response_data = {
-            "version": "Cricko v0.8",
-            "state": m_state,
-            "live": live_data,
-            "meta": {
-                "date": match_obj.get('startTime'),
-                "info": match_obj.get('title'),
-                "teams": {
-                    "home": {"abbr": home_abbr, "name": home_team.get('team', {}).get('longName')},
-                    "away": {"abbr": away_abbr, "name": away_team.get('team', {}).get('longName')}
-                },
-                "venue": {"cc": venue_obj.get('country', {}).get('name'), "city": venue_obj.get('town', {}).get('name'), "name": venue_obj.get('name')}
-            },
-            "pre": {
-                "officials": {
-                    "match_referee": [u.get('player', {}).get('longName') for u in match_obj.get('matchReferees') or []],
-                    "tv_umpire": [u.get('player', {}).get('longName') for u in match_obj.get('tvUmpires') or []],
-                    "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires') or []]
-                },
-                "squads": squads,
-                "toss": {
-                    "choice": "bat" if match_obj.get('tossWinnerChoice') == 1 else "bowl",
-                    "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('tossWinnerTeamId')), "N/A")
-                }
-            },
-            "post": {
-                "result": {
-                    "result": match_obj.get('statusText'),
-                    "pom": pom_slug,
-                    "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('winnerTeamId')), None)
-                },
-                "innings_1": format_innings(content.get('innings') or [], 0),
-                "innings_2": format_innings(content.get('innings') or [], 1)
-            }
+        result_data = {
+            "state": m_state, "live": live_data,
+            "meta": {"date": match_obj.get('startTime'), "info": match_obj.get('title'), "teams": {"home": {"abbr": home_team.get('team', {}).get('abbreviation'), "name": home_team.get('team', {}).get('longName')}, "away": {"abbr": away_team.get('team', {}).get('abbreviation'), "name": away_team.get('team', {}).get('longName')}}, "venue": {"cc": venue_obj.get('country', {}).get('name'), "city": venue_obj.get('town', {}).get('name'), "name": venue_obj.get('name')}},
+            "pre": {"officials": {"match_referee": [u.get('player', {}).get('longName') for u in match_obj.get('matchReferees') or []], "tv_umpire": [u.get('player', {}).get('longName') for u in match_obj.get('tvUmpires') or []], "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires') or []]}, "squads": squads, "toss": {"choice": "bat" if match_obj.get('tossWinnerChoice') == 1 else "bowl", "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('tossWinnerTeamId')), "N/A")}},
+            "post": {"result": {"result": match_obj.get('statusText'), "pom": next((a.get('player', {}).get('slug', "") for a in content.get('matchPlayerAwards', []) if a.get('type') == "PLAYER_OF_MATCH"), ""), "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('winnerTeamId')), None)}, "innings_1": format_innings(content.get('innings') or [], 0), "innings_2": format_innings(content.get('innings') or [], 1)}
         }
         
-        CACHE[target_url] = {"expiry": time.time() + CACHE_TTL, "data": response_data}
-        return response_data
+        response = {"version": "Cricko v0.8", "result": result_data}
+        CACHE[target_url] = {"expiry": time.time() + CACHE_TTL, "data": response}
+        return response
     except Exception:
         logger.error(traceback.format_exc())
-        return {}
+        return {"version": "Cricko v0.8", "result": {}}
+
+@app.post("/teams")
+async def scrape_teams(payload: ScrapeRequest):
+    """Parses series squad list and deep-scrapes each team for full squad details."""
+    target_url = payload.url.split('?')[0]
+    if target_url in CACHE and time.time() < CACHE[target_url]['expiry']:
+        return CACHE[target_url]['data']
+
+    raw_json = await fetch_json(target_url, payload.impersonate)
+    if not raw_json: raise HTTPException(status_code=500, detail="Failed to fetch squads list")
+
+    try:
+        app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('props', {}).get('pageProps', {})
+        data_content = app_props.get('data', {}).get('content', {})
+        squads_list = data_content.get('squads') or app_props.get('initialState', {}).get('content', {}).get('squads', [])
+        
+        series_id = target_url.split('/series/')[1].split('/')[0]
+        formatted_teams = []
+
+        for item in squads_list:
+            team_info = item.get('squad', {})
+            t_slug = team_info.get('slug', '')
+            t_id = team_info.get('objectId', '')
+            t_name_placeholder = team_info.get('name') or item.get('title') or "Unknown Team"
+            
+            team_url = f"https://www.espncricinfo.com/series/{series_id}/{t_slug}-{t_id}/series-squads"
+            team_json = await fetch_json(team_url, payload.impersonate)
+            
+            if team_json:
+                t_props = team_json.get('props', {}).get('appPageProps', team_json.get('props', {}).get('pageProps', {}))
+                t_content = t_props.get('data', {}).get('content', {})
+                squad_details = t_content.get('squadDetails', {})
+                
+                official_name = squad_details.get('team', {}).get('name') or squad_details.get('team', {}).get('longName') or t_name_placeholder
+                members = squad_details.get('players') or t_content.get('squadMembers', [])
+                
+                players = []
+                captain_slug = ""
+                for m in members:
+                    p_info = m.get('player') if 'player' in m else m
+                    slug = p_info.get('slug')
+                    if not slug: continue
+                    if "C" in str(m.get('playerRoleType', '')) or m.get('isCaptain'): captain_slug = slug
+                    roles_raw = p_info.get('playingRoles') or p_info.get('playingRole', [])
+                    role_str = ", ".join([r.get('name') if isinstance(r, dict) else str(r) for r in (roles_raw if isinstance(roles_raw, list) else [roles_raw])])
+                    players.append({"name": p_info.get('longName') or p_info.get('name'), "slug": slug, "role": role_str})
+
+                meta = TEAM_META.get(official_name)
+                if not meta:
+                    for name, data in TEAM_META.items():
+                        if data["abbr"].lower() == official_name.lower():
+                            meta = data
+                            official_name = name
+                            break
+                if meta:
+                    formatted_teams.append({
+                        "ci": f"{t_slug}-{t_id}",
+                        "name": official_name,
+                        "abbr": meta["abbr"],
+                        "color": meta["color"],
+                        "cpt": captain_slug,
+                        "squad": players
+                    })
+            time.sleep(0.5)
+
+        response = {"version": "Cricko v0.8", "teams": formatted_teams}
+        CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 60), "data": response}
+        return response
+    except Exception:
+        logger.error(traceback.format_exc())
+        return {"version": "Cricko v0.8", "teams": []}
 
 if __name__ == "__main__":
     import uvicorn
