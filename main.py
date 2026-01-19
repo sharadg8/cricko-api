@@ -249,8 +249,8 @@ async def scrape_match(payload: ScrapeRequest):
 
         # Live Data
         live_data = {}
-        if m_state == "live":
-            lp = match_obj.get('livePerformance', {})
+        lp = match_obj.get('livePerformance', {})
+        if lp:
             live_data = {
                 "batting": [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')],
                 "bowling": [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
