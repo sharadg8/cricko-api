@@ -347,7 +347,7 @@ async def scrape_teams(payload: ScrapeRequest):
                 t_content = t_props.get('data', {}).get('content', {})
                 squad_details = t_content.get('squadDetails', {})
                 
-                official_name = squad_details.get('team', {}).get('name') or squad_details.get('team', {}).get('longName') or t_name_placeholder
+                official_name = squad_details.get('team', {}).get('name') or squad_details.get('squad', {}).get('teamName') or squad_details.get('team', {}).get('longName') or t_name_placeholder
                 members = squad_details.get('players') or t_content.get('squadMembers', [])
                 
                 logger.info(f"TRACING: Team {official_name} has {len(members)} members")
