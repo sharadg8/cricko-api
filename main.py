@@ -27,7 +27,7 @@ ALLOWED_ORIGINS = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,    # Restricted to specific sites
+    allow_origins=["*"], # Temporarily open for testing, change back to ALLOWED_ORIGINS later
     allow_credentials=True,
     allow_methods=["POST", "GET"],    # Limit to required methods
     allow_headers=["*"],
@@ -159,12 +159,18 @@ def format_innings(innings_list, index):
 async def fetch_json(url, impersonate="chrome120"):
     """Generic fetch for __NEXT_DATA__ JSON from Cricinfo."""
     try:
+        logger.info(f"Fetching URL: {url} with impersonation: {impersonate}")
         resp = requests.get(url, impersonate=impersonate, timeout=30, verify=False)
-        if resp.status_code != 200: return None
+        if resp.status_code != 200: 
+            logger.warning(f"Non-200 status code: {resp.status_code} for URL: {url}")
+            return None
         soup = BeautifulSoup(resp.text, 'html.parser')
         script_tag = soup.find('script', id='__NEXT_DATA__')
+        if not script_tag:
+            logger.warning(f"__NEXT_DATA__ script tag not found in {url}")
         return json.loads(script_tag.string) if script_tag else None
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error fetching JSON from {url}: {str(e)}")
         return None
 
 @app.get("/")
@@ -292,18 +298,32 @@ async def scrape_match(payload: ScrapeRequest):
 async def scrape_teams(payload: ScrapeRequest):
     """Parses series squad list and deep-scrapes each team for full squad details."""
     target_url = payload.url.split('?')[0]
+    logger.info(f"TRACING: /teams request for {target_url}")
+    
     if target_url in CACHE and time.time() < CACHE[target_url]['expiry']:
+        logger.info("TRACING: Returning cached data for /teams")
         return CACHE[target_url]['data']
 
     raw_json = await fetch_json(target_url, payload.impersonate)
-    if not raw_json: raise HTTPException(status_code=500, detail="Failed to fetch squads list")
+    if not raw_json: 
+        logger.error("TRACING: Failed to fetch initial squads list JSON")
+        raise HTTPException(status_code=500, detail="Failed to fetch squads list")
 
     try:
         app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('props', {}).get('pageProps', {})
         data_content = app_props.get('data', {}).get('content', {})
         squads_list = data_content.get('squads') or app_props.get('initialState', {}).get('content', {}).get('squads', [])
         
-        series_id = target_url.split('/series/')[1].split('/')[0]
+        logger.info(f"TRACING: Found {len(squads_list)} squads in initial JSON")
+
+        # Extract series_id correctly
+        try:
+            series_id = target_url.split('/series/')[1].split('/')[0]
+            logger.info(f"TRACING: Extracted series_id: {series_id}")
+        except Exception as e:
+            logger.error(f"TRACING: Failed to extract series_id from {target_url}: {str(e)}")
+            return {"version": "Cricko v0.8", "teams": [], "error": "Invalid series URL structure"}
+
         formatted_teams = []
 
         for item in squads_list:
@@ -312,7 +332,14 @@ async def scrape_teams(payload: ScrapeRequest):
             t_id = team_info.get('objectId', '')
             t_name_placeholder = team_info.get('name') or item.get('title') or "Unknown Team"
             
+            logger.info(f"TRACING: Processing squad: {t_name_placeholder} (Slug: {t_slug}, ID: {t_id})")
+
+            if not t_slug or not t_id:
+                logger.warning(f"TRACING: Skipping squad {t_name_placeholder} due to missing slug/ID")
+                continue
+
             team_url = f"https://www.espncricinfo.com/series/{series_id}/{t_slug}-{t_id}/series-squads"
+            logger.info(f"TRACING: Fetching details for {t_name_placeholder} from {team_url}")
             team_json = await fetch_json(team_url, payload.impersonate)
             
             if team_json:
@@ -323,6 +350,8 @@ async def scrape_teams(payload: ScrapeRequest):
                 official_name = squad_details.get('team', {}).get('name') or squad_details.get('team', {}).get('longName') or t_name_placeholder
                 members = squad_details.get('players') or t_content.get('squadMembers', [])
                 
+                logger.info(f"TRACING: Team {official_name} has {len(members)} members")
+
                 players = []
                 captain_slug = ""
                 for m in members:
@@ -334,30 +363,42 @@ async def scrape_teams(payload: ScrapeRequest):
                     role_str = ", ".join([r.get('name') if isinstance(r, dict) else str(r) for r in (roles_raw if isinstance(roles_raw, list) else [roles_raw])])
                     players.append({"name": p_info.get('longName') or p_info.get('name'), "slug": slug, "role": role_str})
 
+                # Try to find meta in TEAM_META
                 meta = TEAM_META.get(official_name)
                 if not meta:
+                    logger.info(f"TRACING: Official name '{official_name}' not found in TEAM_META, searching by abbreviation...")
                     for name, data in TEAM_META.items():
-                        if data["abbr"].lower() == official_name.lower():
+                        # We don't have abbr yet from scraping easily, but let's try matching name fragments
+                        if name.lower() in official_name.lower() or official_name.lower() in name.lower():
                             meta = data
-                            official_name = name
+                            logger.info(f"TRACING: Fuzzy matched '{official_name}' to '{name}'")
                             break
-                if meta:
-                    formatted_teams.append({
-                        "ci": f"{t_slug}-{t_id}",
-                        "name": official_name,
-                        "abbr": meta["abbr"],
-                        "color": meta["color"],
-                        "cpt": captain_slug,
-                        "squad": players
-                    })
+                
+                # If still not found, provide defaults so we don't return an empty list
+                if not meta:
+                    logger.warning(f"TRACING: No meta found for {official_name}. Using defaults.")
+                    meta = {"abbr": official_name[:3].upper(), "color": "#888888"}
+
+                formatted_teams.append({
+                    "ci": f"{t_slug}-{t_id}",
+                    "name": official_name,
+                    "abbr": meta["abbr"],
+                    "color": meta["color"],
+                    "cpt": captain_slug,
+                    "squad": players
+                })
+            else:
+                logger.error(f"TRACING: Failed to fetch deep-scrape JSON for {team_url}")
+
             time.sleep(0.5)
 
+        logger.info(f"TRACING: Finished. Returning {len(formatted_teams)} formatted teams.")
         response = {"version": "Cricko v0.8", "teams": formatted_teams}
         CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 60), "data": response}
         return response
-    except Exception:
-        logger.error(traceback.format_exc())
-        return {"version": "Cricko v0.8", "teams": []}
+    except Exception as e:
+        logger.error(f"TRACING CRITICAL ERROR: {traceback.format_exc()}")
+        return {"version": "Cricko v0.8", "teams": [], "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
