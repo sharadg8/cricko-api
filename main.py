@@ -272,19 +272,20 @@ async def scrape_match(payload: ScrapeRequest):
             t_abbr = tp.get('team', {}).get('abbreviation', 'UNK')
             squads[t_abbr] = {p.get('player', {}).get('slug'): {"name": p.get('player', {}).get('longName'), "slug": p.get('player', {}).get('slug'), "role": f"[{p.get('playerRoleType', {})}] {', '.join(p.get('player', {}).get('playingRoles', []))}"} for p in tp.get('players', []) if p.get('player', {}).get('slug')}
 
+        result_data = {
+            "state": m_state,
+            "meta": {"date": match_obj.get('startTime'), "info": match_obj.get('title'), "teams": {"home": {"abbr": home_team.get('team', {}).get('abbreviation'), "name": home_team.get('team', {}).get('longName')}, "away": {"abbr": away_team.get('team', {}).get('abbreviation'), "name": away_team.get('team', {}).get('longName')}}, "venue": {"cc": venue_obj.get('country', {}).get('name'), "city": venue_obj.get('town', {}).get('name'), "name": venue_obj.get('name')}},
+            "pre": {"officials": {"match_referee": [u.get('player', {}).get('longName') for u in match_obj.get('matchReferees') or []], "tv_umpire": [u.get('player', {}).get('longName') for u in match_obj.get('tvUmpires') or []], "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires') or []]}, "squads": squads, "toss": {"choice": "bat" if match_obj.get('tossWinnerChoice') == 1 else "bowl", "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('tossWinnerTeamId')), "N/A")}},
+            "post": {"result": {"result": match_obj.get('statusText'), "pom": next((a.get('player', {}).get('slug', "") for a in content.get('matchPlayerAwards', []) if a.get('type') == "PLAYER_OF_MATCH"), ""), "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('winnerTeamId')), None)}, "innings_1": format_innings(content.get('innings') or [], 0), "innings_2": format_innings(content.get('innings') or [], 1)}
+        }
+
+        # Live only if available
         lp = match_obj.get('livePerformance', {})
         live_data = {"batting": [], "bowling": []}
         if lp:
             live_data["batting"] = [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')]
             live_data["bowling"] = [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
-
-        result_data = {
-            "state": m_state, 
-            "live": live_data,
-            "meta": {"date": match_obj.get('startTime'), "info": match_obj.get('title'), "teams": {"home": {"abbr": home_team.get('team', {}).get('abbreviation'), "name": home_team.get('team', {}).get('longName')}, "away": {"abbr": away_team.get('team', {}).get('abbreviation'), "name": away_team.get('team', {}).get('longName')}}, "venue": {"cc": venue_obj.get('country', {}).get('name'), "city": venue_obj.get('town', {}).get('name'), "name": venue_obj.get('name')}},
-            "pre": {"officials": {"match_referee": [u.get('player', {}).get('longName') for u in match_obj.get('matchReferees') or []], "tv_umpire": [u.get('player', {}).get('longName') for u in match_obj.get('tvUmpires') or []], "umpires": [u.get('player', {}).get('longName') for u in match_obj.get('umpires') or []]}, "squads": squads, "toss": {"choice": "bat" if match_obj.get('tossWinnerChoice') == 1 else "bowl", "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('tossWinnerTeamId')), "N/A")}},
-            "post": {"result": {"result": match_obj.get('statusText'), "pom": next((a.get('player', {}).get('slug', "") for a in content.get('matchPlayerAwards', []) if a.get('type') == "PLAYER_OF_MATCH"), ""), "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('winnerTeamId')), None)}, "innings_1": format_innings(content.get('innings') or [], 0), "innings_2": format_innings(content.get('innings') or [], 1)}
-        }
+            result_data["live"] = live_data
         
         response = {"version": "Cricko v0.8", "result": result_data}
         CACHE[target_url] = {"expiry": time.time() + CACHE_TTL, "data": response}
