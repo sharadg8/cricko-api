@@ -18,7 +18,6 @@ logger = logging.getLogger("cric-scraper")
 app = FastAPI()
 
 # --- SECURITY: ALLOWED ORIGINS ---
-# Replace these with your actual production domains (e.g., https://your-app.vercel.app)
 ALLOWED_ORIGINS = [
     "http://localhost:5173",          # For local React development
     "http://127.0.0.1:5173",
@@ -91,12 +90,14 @@ class ScrapeRequest(BaseModel):
     series_prefix: str = ""
 
 def format_innings(innings_list, index):
-    """Helper to format individual innings data for scorecards."""
+    """Helper to format individual innings data for scorecards, including fielding stats."""
     if not innings_list or len(innings_list) <= index: 
         return None
     inn = innings_list[index] or {}
     
     batting = []
+    fielding_stats = {} # Map player_slug -> {c, st, ro}
+
     for b in inn.get('inningBatsmen') or []:
         if b and b.get('player') and (b.get('runs') is not None or b.get('balls') is not None or b.get('isOut') or b.get('isBatting')):
             dismissal_obj = b.get('dismissalText') or {}
@@ -109,6 +110,29 @@ def format_innings(innings_list, index):
                 "sr": b.get('strikerate', '0.00'),
                 "sts": dismissal_obj.get('long', 'not out')
             })
+
+            # Fielding Logic
+            if b.get('isOut'):
+                d_type = b.get('dismissalType')
+                # dismissalFielders contains the players involved in the dismissal
+                for f in b.get('dismissalFielders', []):
+                    if f.get('player'):
+                        f_slug = f.get('player', {}).get('slug')
+                        if not f_slug: continue
+                        if f_slug not in fielding_stats:
+                            fielding_stats[f_slug] = {"c": 0, "st": 0, "ro": 0}
+                        
+                        if d_type == 1: # Caught
+                            fielding_stats[f_slug]["c"] += 1
+                        elif d_type == 5: # Stumped
+                            fielding_stats[f_slug]["st"] += 1
+                        elif d_type == 4: # Run out
+                            fielding_stats[f_slug]["ro"] += 1
+
+    fielding_list = [
+        {"id": slug, "c": s["c"], "st": s["st"], "ro": s["ro"]}
+        for slug, s in fielding_stats.items()
+    ]
 
     return {
         "team": (inn.get('team') or {}).get('abbreviation', 'UNK'),
@@ -130,6 +154,7 @@ def format_innings(innings_list, index):
                 "econ": bo.get('economy', '0.00')
             } for bo in inn.get('inningBowlers') or [] if bo and bo.get('player')
         ],
+        "fielding": fielding_list,
         "partnerships": [
             {
                 "r": p.get('runs', 0), 
@@ -312,7 +337,6 @@ async def scrape_teams(payload: ScrapeRequest):
         data_content = app_props.get('data', {}).get('content', {})
         squads_list = data_content.get('squads') or app_props.get('initialState', {}).get('content', {}).get('squads', [])
         
-        # Extract series_id correctly
         try:
             series_id = target_url.split('/series/')[1].split('/')[0]
         except Exception as e:
@@ -353,16 +377,13 @@ async def scrape_teams(payload: ScrapeRequest):
                     role_str = ", ".join([r.get('name') if isinstance(r, dict) else str(r) for r in (roles_raw if isinstance(roles_raw, list) else [roles_raw])])
                     players.append({"name": p_info.get('longName') or p_info.get('name'), "slug": slug, "role": role_str})
 
-                # Try to find meta in TEAM_META
                 meta = TEAM_META.get(official_name)
                 if not meta:
                     for name, data in TEAM_META.items():
-                        # We don't have abbr yet from scraping easily, but let's try matching name fragments
                         if name.lower() in official_name.lower() or official_name.lower() in name.lower():
                             meta = data
                             break
                 
-                # If still not found, provide defaults so we don't return an empty list
                 if not meta:
                     logger.warning(f"TRACING: No meta found for {official_name}. Using defaults.")
                     meta = {"abbr": official_name[:3].upper(), "color": "#888888"}
