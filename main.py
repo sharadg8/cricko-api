@@ -205,7 +205,7 @@ async def scrape_schedule(payload: ScrapeRequest):
             containers = data_content.get('schedule', {}).get('containers', [])
             if containers: matches_list = containers[0].get('matches', [])
 
-        formatted_schedule = {"version": "Cricko v0.8", "matches": {}}
+        formatted_schedule = {"version": "Cricko v0.8", "data": {}}
         
         for idx, match in enumerate(matches_list, 1):
             mid = f"{series_prefix}-{str(idx).zfill(3)}" if series_prefix else str(idx).zfill(3)
@@ -237,13 +237,13 @@ async def scrape_schedule(payload: ScrapeRequest):
                     "result": match.get('statusText', ''),
                     "win": next((t["team"]["abbreviation"] for t in match.get("teams", []) if str(t.get("team", {}).get("id")) == str(match.get('winnerTeamId'))), None)
                 }
-            formatted_schedule["matches"][mid] = entry
+            formatted_schedule["data"][mid] = entry
 
         CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 5), "data": formatted_schedule}
         return formatted_schedule
-    except Exception:
+    except Exception as e:
         logger.error(traceback.format_exc())
-        return {}
+        return {"version": "Cricko v0.8", "data": {}, "error": str(e)}
 
 @app.post("/match")
 async def scrape_match(payload: ScrapeRequest):
@@ -287,12 +287,12 @@ async def scrape_match(payload: ScrapeRequest):
             live_data["bowling"] = [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
             result_data["live"] = live_data
         
-        response = {"version": "Cricko v0.8", "result": result_data}
+        response = {"version": "Cricko v0.8", "data": result_data}
         CACHE[target_url] = {"expiry": time.time() + CACHE_TTL, "data": response}
         return response
-    except Exception:
+    except Exception as e:
         logger.error(traceback.format_exc())
-        return {"version": "Cricko v0.8", "result": {}}
+        return {"version": "Cricko v0.8", "data": {}, "error": str(e)}
 
 @app.post("/teams")
 async def scrape_teams(payload: ScrapeRequest):
@@ -380,12 +380,12 @@ async def scrape_teams(payload: ScrapeRequest):
 
             time.sleep(0.5)
 
-        response = {"version": "Cricko v0.8", "teams": formatted_teams}
+        response = {"version": "Cricko v0.8", "data": formatted_teams}
         CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 60), "data": response}
         return response
     except Exception as e:
         logger.error(f"TRACING CRITICAL ERROR: {traceback.format_exc()}")
-        return {"version": "Cricko v0.8", "teams": [], "error": str(e)}
+        return {"version": "Cricko v0.8", "data": [], "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
