@@ -300,7 +300,23 @@ async def scrape_match(payload: ScrapeRequest):
         # Bowler lookup to enrich livePerformance with r4, r6, nb, wd
         bowl_map = {b.get('player', {}).get('slug'): b for inn in innings_list for b in (inn.get('inningBowlers') or []) if b.get('player')}
 
+        live_inn = live_obj.get('inning', {})
+        pship = live_obj.get('partnership', {})
         live = {
+            "batTeam": live_inn.get('team', {}).get('abbreviation'),
+            "bowlTeam": next((t.get('team', {}).get('abbreviation') for t in teams_list if t.get('team', {}).get('id') != live_inn.get('team', {}).get('id')), None),
+            "score": f"{live_inn.get('runs', 0)}/{live_inn.get('wickets', 0)}",
+            "overs": live_inn.get('overs', 0),
+            "crr": live_inn.get('runRate'),
+            "rrr": live_inn.get('requiredRunRate'),
+            "target": live_inn.get('target'),
+            "pship": {
+                "r": pship.get('runs', 0), 
+                "b": pship.get('balls', 0), 
+                "p1": f"{pship.get('batsman1', {}).get('longName', '')} {pship.get('batsman1Runs', 0)}({pship.get('batsman1Balls', 0)})",
+                "p2": f"{pship.get('batsman2', {}).get('longName', '')} {pship.get('batsman2Runs', 0)}({pship.get('batsman2Balls', 0)})"
+            } if pship else None,
+            "recent": [{"o": b.get('oversActual'), "v": b.get('totalRuns')} for b in (content.get('recentBallCommentary', {}).get('ballShortDetails') or [])[:18]],
             "batting": [{"id": b.get('player', {}).get('slug'), "name": b.get('player', {}).get('longName'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in live_obj.get('batsmen', []) if b.get('player')] if live_obj else [],
             "bowling": [{"id": bo.get('player', {}).get('slug'), "name": bo.get('player', {}).get('longName'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r4": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('fours', 0), "r6": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('sixes', 0), "nb": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('noballs', 0), "wd": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('wides', 0), "r0": bo.get('dots')} for bo in live_obj.get('bowlers', []) if bo.get('player')] if live_obj else []
         }
