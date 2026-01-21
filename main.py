@@ -315,6 +315,21 @@ async def scrape_match(payload: ScrapeRequest):
             # Fallback to content or livePerformance if still None
             if not pship:
                 pship = live_obj.get('partnership') or content.get('partnership', {})
+
+            # Helper for ball value logic
+            def get_ball_val(b):
+                parts = [str(b.get('totalRuns', 0))]
+                if b.get('isWicket'): parts.append("w")
+                if b.get('isFour'): parts.append("f")
+                if b.get('isSix'): parts.append("s")
+                if b.get('byes', 0) > 0: parts.append("b")
+                if b.get('legbyes', 0) > 0: parts.append("lb")
+                if b.get('wides', 0) > 0: parts.append("wd")
+                if b.get('noballs', 0) > 0: parts.append("nb")
+                
+                # Join with hyphens if there are extras/wickets, otherwise return the runs
+                return "-".join(parts) if len(parts) > 1 else parts[0]
+
             result_data["live"] = {
                 "team": live_inn.get('team', {}).get('abbreviation'),
                 "score": f"{live_inn.get('runs', 0)}/{live_inn.get('wickets', 0)}",
@@ -328,7 +343,7 @@ async def scrape_match(payload: ScrapeRequest):
                     "p1": f"{pship.get('player1', {}).get('mobileName', '')} {pship.get('player1Runs', 0)}({pship.get('player1Balls', 0)})",
                     "p2": f"{pship.get('player2', {}).get('mobileName', '')} {pship.get('player2Runs', 0)}({pship.get('player2Balls', 0)})"
                 } if pship else None,
-                "recent": [{"o": b.get('oversUnique'), "v": b.get('totalRuns')} for b in (content.get('recentBallCommentary', {}).get('ballComments') or [])[:18]],
+                "recent": [{"o": b.get('oversUnique'), "v": get_ball_val(b)} for b in (content.get('recentBallCommentary', {}).get('ballComments') or [])[:18]],
                 "batting": [{"id": b.get('player', {}).get('slug'), "name": b.get('player', {}).get('longName'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in live_obj.get('batsmen', []) if b.get('player')] if live_obj else [],
                 "bowling": [{"id": bo.get('player', {}).get('slug'), "name": bo.get('player', {}).get('longName'), "o": bo.get('overs'), "r": bo.get('conceded'), "m": bo.get('maidens'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r4": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('fours', 0), "r6": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('sixes', 0), "nb": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('noballs', 0), "wd": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('wides', 0), "r0": bo.get('dots')} for bo in live_obj.get('bowlers', []) if bo.get('player')] if live_obj else []
             }
