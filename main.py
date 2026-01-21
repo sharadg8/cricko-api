@@ -308,13 +308,21 @@ async def scrape_match(payload: ScrapeRequest):
         if live_obj and live_inn:
             # Bowler lookup to enrich livePerformance with r4, r6, nb, wd
             bowl_map = {b.get('player', {}).get('slug'): b for inn in innings_list for b in (inn.get('inningBowlers') or []) if b.get('player')}
-            pship = live_obj.get('partnership', {})
+            # Find active partnership from the innings partnership list based on current batsmen
+            active_batsmen = [b.get('player', {}).get('id') for b in live_obj.get('batsmen', []) if b.get('player')]
+            inn_pships = live_inn.get('partnership', [])
+            pship = None
+            if active_batsmen:
+                pship = next((p for p in inn_pships if p.get('batsman1', {}).get('id') in active_batsmen and p.get('batsman2', {}).get('id') in active_batsmen), None)
+            # Fallback to content or livePerformance if still None
+            if not pship:
+                pship = live_obj.get('partnership') or content.get('partnership', {})
             result_data["live"] = {
                 "team": live_inn.get('team', {}).get('abbreviation'),
                 "score": f"{live_inn.get('runs', 0)}/{live_inn.get('wickets', 0)}",
                 "overs": live_inn.get('overs', 0),
-                "crr": live_inn.get('runRate'),
-                "rrr": live_inn.get('requiredRunRate'),
+                "crr": live_obj.get('runRate') or live_inn.get('runRate'),
+                "rrr": live_obj.get('requiredRunRate') or live_inn.get('requiredRunRate'),
                 "target": live_inn.get('target'),
                 "pship": {
                     "r": pship.get('runs', 0), 
