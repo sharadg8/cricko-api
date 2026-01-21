@@ -325,8 +325,8 @@ async def scrape_match(payload: ScrapeRequest):
                 "pship": {
                     "r": pship.get('runs', 0), 
                     "b": pship.get('balls', 0), 
-                    "p1": f"{pship.get('batsman1', {}).get('longName', '')} {pship.get('batsman1Runs', 0)}({pship.get('batsman1Balls', 0)})",
-                    "p2": f"{pship.get('batsman2', {}).get('longName', '')} {pship.get('batsman2Runs', 0)}({pship.get('batsman2Balls', 0)})"
+                    "p1": f"{pship.get('player1', {}).get('mobileName', '')} {pship.get('player1Runs', 0)}({pship.get('player1Balls', 0)})",
+                    "p2": f"{pship.get('player2', {}).get('mobileName', '')} {pship.get('player2Runs', 0)}({pship.get('player2Balls', 0)})"
                 } if pship else None,
                 "recent": [{"o": b.get('oversUnique'), "v": b.get('totalRuns')} for b in (content.get('recentBallCommentary', {}).get('ballComments') or [])[:18]],
                 "batting": [{"id": b.get('player', {}).get('slug'), "name": b.get('player', {}).get('longName'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in live_obj.get('batsmen', []) if b.get('player')] if live_obj else [],
