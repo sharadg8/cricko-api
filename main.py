@@ -273,7 +273,7 @@ async def scrape_schedule(payload: ScrapeRequest):
 @app.post("/match")
 async def scrape_match(payload: ScrapeRequest):
     target_url = payload.url.split('?')[0]
-    if "full-scorecard" not in target_url: target_url = target_url.rstrip("/") + "/full-scorecard"
+    if "live-cricket-score" not in target_url: target_url = target_url.rstrip("/") + "/live-cricket-score"
     if target_url in CACHE:
         if time.time() < CACHE[target_url]['expiry']: return CACHE[target_url]['data']
 
@@ -282,9 +282,10 @@ async def scrape_match(payload: ScrapeRequest):
 
     try:
         app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('props', {}).get('pageProps', {})
-        data_wrapper = app_props.get('data', {})
+        data_wrapper = app_props.get('data', {}).get('data', {})
         content = data_wrapper.get('content', {})
         match_obj = data_wrapper.get('match', {})
+        live_obj = content.get('livePerformance', {})
         
         m_state = (match_obj.get('state') or 'pre').lower()
         venue_obj = match_obj.get('ground') or {}
@@ -306,22 +307,7 @@ async def scrape_match(payload: ScrapeRequest):
 
         # --- LIVE DATA LOGIC ---
         live_data = {"batting": [], "bowling": []}
-        
-        # Check for live data in current JSON first
-        lp = content.get('livePerformance', {})
-        
-        # If match is live and current JSON is missing live stats, fetch the live-cricket-score page
-        if m_state == "live" and not lp:
-            live_url = target_url.replace("/full-scorecard", "/live-cricket-score")
-            if "/live-cricket-score" not in live_url:
-                live_url = target_url + "/live-cricket-score"
-            
-            live_json = await fetch_json(live_url, payload.impersonate)
-            if live_json:
-                live_props = live_json.get('props', {}).get('appPageProps', {})
-                lp = live_props.get('data', {}).get('data', {}).get('content', {}).get('livePerformance', {})
-
-        if lp:
+        if live_obj:
             live_data["batting"] = [
                 {
                     "id": b.get('player', {}).get('slug'), 
@@ -332,7 +318,7 @@ async def scrape_match(payload: ScrapeRequest):
                     "r6": b.get('sixes'), 
                     "sr": b.get('strikerate'), 
                     "is_striker": b.get('isStriker', False)
-                } for b in lp.get('batsmen', []) if b.get('player')
+                } for b in live_obj.get('batsmen', []) if b.get('player')
             ]
             live_data["bowling"] = [
                 {
@@ -347,7 +333,7 @@ async def scrape_match(payload: ScrapeRequest):
                     "nb": bo.get('noballs', 0), 
                     "wd": bo.get('wides', 0), 
                     "r0": bo.get('dots')
-                } for bo in lp.get('bowlers', []) if bo.get('player')
+                } for bo in live_obj.get('bowlers', []) if bo.get('player')
             ]
             result_data["live"] = live_data
         
