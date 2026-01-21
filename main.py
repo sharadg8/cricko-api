@@ -305,7 +305,7 @@ async def scrape_match(payload: ScrapeRequest):
         }
 
         # Live only if available
-        lp = match_obj.get('livePerformance', {})
+        lp = content.get('livePerformance', {})
         live_data = {"batting": [], "bowling": []}
         if lp:
             live_data["batting"] = [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')]
