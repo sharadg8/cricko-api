@@ -304,12 +304,51 @@ async def scrape_match(payload: ScrapeRequest):
             "post": {"result": {"result": match_obj.get('statusText'), "pom": next((a.get('player', {}).get('slug', "") for a in content.get('matchPlayerAwards', []) if a.get('type') == "PLAYER_OF_MATCH"), ""), "win": next((t.get("team", {}).get("abbreviation") for t in teams_list if t.get("team", {}).get("id") == match_obj.get('winnerTeamId')), None)}, "innings_1": format_innings(content.get('innings') or [], 0), "innings_2": format_innings(content.get('innings') or [], 1)}
         }
 
-        # Live only if available
-        lp = content.get('livePerformance', {})
+        # --- LIVE DATA LOGIC ---
         live_data = {"batting": [], "bowling": []}
+        
+        # Check for live data in current JSON first
+        lp = content.get('livePerformance', {})
+        
+        # If match is live and current JSON is missing live stats, fetch the live-cricket-score page
+        if m_state == "live" and not lp:
+            live_url = target_url.replace("/full-scorecard", "/live-cricket-score")
+            if "/live-cricket-score" not in live_url:
+                live_url = target_url + "/live-cricket-score"
+            
+            live_json = await fetch_json(live_url, payload.impersonate)
+            if live_json:
+                live_props = live_json.get('props', {}).get('appPageProps', {})
+                lp = live_props.get('data', {}).get('data', {}).get('content', {}).get('livePerformance', {})
+
         if lp:
-            live_data["batting"] = [{"id": b.get('player', {}).get('slug'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in lp.get('batsmen', []) if b.get('player')]
-            live_data["bowling"] = [{"id": bo.get('player', {}).get('slug'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r0": bo.get('dots')} for bo in lp.get('bowlers', []) if bo.get('player')]
+            live_data["batting"] = [
+                {
+                    "id": b.get('player', {}).get('slug'), 
+                    "name": b.get('player', {}).get('longName'), 
+                    "r": b.get('runs'), 
+                    "b": b.get('balls'), 
+                    "r4": b.get('fours'), 
+                    "r6": b.get('sixes'), 
+                    "sr": b.get('strikerate'), 
+                    "is_striker": b.get('isStriker', False)
+                } for b in lp.get('batsmen', []) if b.get('player')
+            ]
+            live_data["bowling"] = [
+                {
+                    "id": bo.get('player', {}).get('slug'), 
+                    "name": bo.get('player', {}).get('longName'), 
+                    "o": bo.get('overs'), 
+                    "r": bo.get('conceded'), 
+                    "w": bo.get('wickets'), 
+                    "econ": bo.get('economy'), 
+                    "r4": bo.get('fours', 0), 
+                    "r6": bo.get('sixes', 0), 
+                    "nb": bo.get('noballs', 0), 
+                    "wd": bo.get('wides', 0), 
+                    "r0": bo.get('dots')
+                } for bo in lp.get('bowlers', []) if bo.get('player')
+            ]
             result_data["live"] = live_data
         
         response = {"version": "Cricko v0.8", "data": result_data}
