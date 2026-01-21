@@ -309,7 +309,7 @@ async def scrape_match(payload: ScrapeRequest):
             # Bowler lookup to enrich livePerformance with r4, r6, nb, wd
             bowl_map = {b.get('player', {}).get('slug'): b for inn in innings_list for b in (inn.get('inningBowlers') or []) if b.get('player')}
             # Partnership logic: Loop for isLive: true in current innings partnerships
-            inn_pships = live_inn.get('partnership', [])
+            inn_pships = live_inn.get('inningPartnerships', [])
             pship = next((p for p in inn_pships if p.get('isLive') is True), None)
  
             # Fallback to content or livePerformance if still None
@@ -319,8 +319,8 @@ async def scrape_match(payload: ScrapeRequest):
                 "team": live_inn.get('team', {}).get('abbreviation'),
                 "score": f"{live_inn.get('runs', 0)}/{live_inn.get('wickets', 0)}",
                 "overs": live_inn.get('overs', 0),
-                "crr": match_obj.get('statusData', {}).get('statusTextLangData', {}).get('crr'),
-                "rrr": match_obj.get('statusData', {}).get('statusTextLangData', {}).get('rrr'),
+                "crr": match_obj.get('statusData', {}).get('statusTextLangData', {}).get('crr') or content.get('supportInfo', {}).get('liveInfo', {}).get('currentRunRate'),
+                "rrr": match_obj.get('statusData', {}).get('statusTextLangData', {}).get('rrr') or content.get('supportInfo', {}).get('liveInfo', {}).get('requiredRunrate'),
                 "target": live_inn.get('target'),
                 "pship": {
                     "r": pship.get('runs', 0), 
@@ -330,7 +330,7 @@ async def scrape_match(payload: ScrapeRequest):
                 } if pship else None,
                 "recent": [{"o": b.get('oversUnique'), "v": b.get('totalRuns')} for b in (content.get('recentBallCommentary', {}).get('ballComments') or [])[:18]],
                 "batting": [{"id": b.get('player', {}).get('slug'), "name": b.get('player', {}).get('longName'), "r": b.get('runs'), "b": b.get('balls'), "r4": b.get('fours'), "r6": b.get('sixes'), "sr": b.get('strikerate'), "is_striker": b.get('isStriker', False)} for b in live_obj.get('batsmen', []) if b.get('player')] if live_obj else [],
-                "bowling": [{"id": bo.get('player', {}).get('slug'), "name": bo.get('player', {}).get('longName'), "o": bo.get('overs'), "r": bo.get('conceded'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r4": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('fours', 0), "r6": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('sixes', 0), "nb": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('noballs', 0), "wd": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('wides', 0), "r0": bo.get('dots')} for bo in live_obj.get('bowlers', []) if bo.get('player')] if live_obj else []
+                "bowling": [{"id": bo.get('player', {}).get('slug'), "name": bo.get('player', {}).get('longName'), "o": bo.get('overs'), "r": bo.get('conceded'), "m": bo.get('maidens'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r4": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('fours', 0), "r6": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('sixes', 0), "nb": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('noballs', 0), "wd": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('wides', 0), "r0": bo.get('dots')} for bo in live_obj.get('bowlers', []) if bo.get('player')] if live_obj else []
             }
         
         response = {"version": "Cricko v0.8", "data": result_data}
