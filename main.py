@@ -305,15 +305,13 @@ async def scrape_match(payload: ScrapeRequest):
         }
 
         live_inn = next((inn for inn in innings_list if inn.get('isCurrent')), {})
-        if live_obj and live_inn:
+        if live_obj and live_inn:            
             # Bowler lookup to enrich livePerformance with r4, r6, nb, wd
             bowl_map = {b.get('player', {}).get('slug'): b for inn in innings_list for b in (inn.get('inningBowlers') or []) if b.get('player')}
-            # Find active partnership from the innings partnership list based on current batsmen
-            active_batsmen = [b.get('player', {}).get('id') for b in live_obj.get('batsmen', []) if b.get('player')]
+            # Partnership logic: Loop for isLive: true in current innings partnerships
             inn_pships = live_inn.get('partnership', [])
-            pship = None
-            if active_batsmen:
-                pship = next((p for p in inn_pships if p.get('batsman1', {}).get('id') in active_batsmen and p.get('batsman2', {}).get('id') in active_batsmen), None)
+            pship = next((p for p in inn_pships if p.get('isLive') is True), None)
+ 
             # Fallback to content or livePerformance if still None
             if not pship:
                 pship = live_obj.get('partnership') or content.get('partnership', {})
@@ -321,8 +319,8 @@ async def scrape_match(payload: ScrapeRequest):
                 "team": live_inn.get('team', {}).get('abbreviation'),
                 "score": f"{live_inn.get('runs', 0)}/{live_inn.get('wickets', 0)}",
                 "overs": live_inn.get('overs', 0),
-                "crr": live_obj.get('runRate') or live_inn.get('runRate'),
-                "rrr": live_obj.get('requiredRunRate') or live_inn.get('requiredRunRate'),
+                "crr": match_obj.get('statusData', {}).get('statusTextLangData', {}).get('crr'),
+                "rrr": match_obj.get('statusData', {}).get('statusTextLangData', {}).get('rrr'),
                 "target": live_inn.get('target'),
                 "pship": {
                     "r": pship.get('runs', 0), 
