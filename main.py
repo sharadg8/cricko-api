@@ -295,7 +295,7 @@ async def scrape_match(payload: ScrapeRequest):
         squads = {}
         for tp in content.get('matchPlayers', {}).get('teamPlayers', []):
             t_abbr = tp.get('team', {}).get('abbreviation', 'UNK')
-            squads[t_abbr] = {p.get('player', {}).get('slug'): {"name": p.get('player', {}).get('longName'), "slug": p.get('player', {}).get('slug'), "role": f"[{p.get('playerRoleType', {})}] {', '.join(p.get('player', {}).get('playingRoles', []))}"} for p in tp.get('players', []) if p.get('player', {}).get('slug')}
+            squads[t_abbr] = {p.get('player', {}).get('slug'): {"name": p.get('player', {}).get('longName'), "id": p.get('player', {}).get('slug'), "role": f"[{p.get('playerRoleType', {})}] {', '.join(p.get('player', {}).get('playingRoles', []))}"} for p in tp.get('players', []) if p.get('player', {}).get('slug')}
 
         result_data = {
             "state": m_state,
@@ -411,7 +411,7 @@ async def scrape_teams(payload: ScrapeRequest):
                     if "C" in str(m.get('playerRoleType', '')) or m.get('isCaptain'): captain_slug = slug
                     roles_raw = p_info.get('playingRoles') or p_info.get('playingRole', [])
                     role_str = ", ".join([r.get('name') if isinstance(r, dict) else str(r) for r in (roles_raw if isinstance(roles_raw, list) else [roles_raw])])
-                    players.append({"name": p_info.get('longName') or p_info.get('name'), "slug": slug, "role": role_str})
+                    players.append({"name": p_info.get('longName') or p_info.get('name'), "id": slug, "role": role_str})
 
                 meta = TEAM_META.get(official_name)
                 if not meta:
