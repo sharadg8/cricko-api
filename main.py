@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 # Standard logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("cric-scraper")
+version = "Cricko v0.8"
 
 app = FastAPI()
 
@@ -49,6 +50,7 @@ TEAM_META = {
     "Afghanistan": {"abbr": "AFG", "color": "#0000ff"},
     "Bangladesh": {"abbr": "BAN", "color": "#006a4e"},
     "Ireland": {"abbr": "IRE", "color": "#16a04a"},
+    "Italy": {"abbr": "ITA", "color": "#004ba0"},
     "Scotland": {"abbr": "SCO", "color": "#004b8d"},
     "Netherlands": {"abbr": "NED", "color": "#f36c21"},
     "Namibia": {"abbr": "NAM", "color": "#0035ad"},
@@ -199,7 +201,7 @@ async def fetch_json(url, impersonate="chrome120"):
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "version": "Cricko v0.8"}
+    return {"status": "online", "version": version}
 
 @app.post("/schedule")
 async def scrape_schedule(payload: ScrapeRequest):
@@ -230,7 +232,7 @@ async def scrape_schedule(payload: ScrapeRequest):
             containers = data_content.get('schedule', {}).get('containers', [])
             if containers: matches_list = containers[0].get('matches', [])
 
-        formatted_schedule = {"version": "Cricko v0.8", "data": {}}
+        formatted_schedule = {"version": version, "data": {}}
         
         for idx, match in enumerate(matches_list, 1):
             mid = f"{series_prefix}-{str(idx).zfill(3)}" if series_prefix else str(idx).zfill(3)
@@ -268,7 +270,7 @@ async def scrape_schedule(payload: ScrapeRequest):
         return formatted_schedule
     except Exception as e:
         logger.error(traceback.format_exc())
-        return {"version": "Cricko v0.8", "data": {}, "error": str(e)}
+        return {"version": version, "data": {}, "error": str(e)}
 
 @app.post("/match")
 async def scrape_match(payload: ScrapeRequest):
@@ -348,20 +350,17 @@ async def scrape_match(payload: ScrapeRequest):
                 "bowling": [{"id": bo.get('player', {}).get('slug'), "name": bo.get('player', {}).get('longName'), "o": bo.get('overs'), "r": bo.get('conceded'), "m": bo.get('maidens'), "w": bo.get('wickets'), "econ": bo.get('economy'), "r4": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('fours', 0), "r6": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('sixes', 0), "nb": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('noballs', 0), "wd": bowl_map.get(bo.get('player', {}).get('slug'), {}).get('wides', 0), "r0": bo.get('dots')} for bo in live_obj.get('bowlers', []) if bo.get('player')] if live_obj else []
             }
         
-        response = {"version": "Cricko v0.8", "data": result_data}
+        response = {"version": version, "data": result_data}
         CACHE[target_url] = {"expiry": time.time() + CACHE_TTL, "data": response}
         return response
     except Exception as e:
         logger.error(traceback.format_exc())
-        return {"version": "Cricko v0.8", "data": {}, "error": str(e)}
+        return {"version": version, "data": {}, "error": str(e)}
 
 @app.post("/teams")
 async def scrape_teams(payload: ScrapeRequest):
     """Parses series squad list and deep-scrapes each team for full squad details."""
     target_url = payload.url.split('?')[0]
-    
-    if target_url in CACHE and time.time() < CACHE[target_url]['expiry']:
-        return CACHE[target_url]['data']
 
     raw_json = await fetch_json(target_url, payload.impersonate)
     if not raw_json: 
@@ -377,7 +376,7 @@ async def scrape_teams(payload: ScrapeRequest):
             series_id = target_url.split('/series/')[1].split('/')[0]
         except Exception as e:
             logger.error(f"TRACING: Failed to extract series_id from {target_url}: {str(e)}")
-            return {"version": "Cricko v0.8", "teams": [], "error": "Invalid series URL structure"}
+            return {"version": version, "data": [], "error": "Invalid series URL structure"}
 
         formatted_teams = []
 
@@ -437,12 +436,60 @@ async def scrape_teams(payload: ScrapeRequest):
 
             time.sleep(0.5)
 
-        response = {"version": "Cricko v0.8", "data": formatted_teams}
-        CACHE[target_url] = {"expiry": time.time() + (CACHE_TTL * 60), "data": response}
+        response = {"version": version, "data": formatted_teams}
         return response
     except Exception as e:
         logger.error(f"TRACING CRITICAL ERROR: {traceback.format_exc()}")
-        return {"version": "Cricko v0.8", "data": [], "error": str(e)}
+        return {"version": version, "data": [], "error": str(e)}
+
+@app.post("/table")
+async def scrape_table(payload: ScrapeRequest):
+    """Parses points table data for a given series URL."""
+    target_url = payload.url.split('?')[0]
+    raw_json = await fetch_json(target_url, payload.impersonate)
+    if not raw_json: raise HTTPException(status_code=500, detail="Failed to fetch data")
+
+    try:
+        app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('data', {})
+        # Cricinfo often nests standigs under content -> standings or groups
+        standings_data = app_props.get('data', {}).get('content', {}).get('standings', {})
+        groups = standings_data.get('groups', [])
+
+        if not groups:
+            # Fallback for different JSON structures
+            groups = app_props.get('initialState', {}).get('content', {}).get('standings', {}).get('groups', [])
+
+        formatted_table = {}
+
+        for group in groups:
+            group_name = group.get('name', 'Group')
+            teams_list = []
+            
+            for team_row in group.get('teamStats', []):
+                team_info = team_row.get('teamInfo', {})
+                stats = {
+                    "rank": team_row.get('rank'),
+                    "name": team_info.get('longName'),
+                    "abbr": team_info.get('abbreviation'),
+                    "played": team_row.get('matchesPlayed'),
+                    "won": team_row.get('matchesWon'),
+                    "lost": team_row.get('matchesLost'),
+                    "tied": team_row.get('matchesTied'),
+                    "nr": team_row.get('matchesNoResult'),
+                    "points": team_row.get('points'),
+                    "nrr": team_row.get('nrr'),
+                    #"form": team_row.get('form', []) # Last 5 matches e.g. ["W", "L", "W"]
+                }
+                teams_list.append(stats)
+            
+            formatted_table[group_name] = teams_list
+
+        response = {"version": version, "data": formatted_table}
+        return response
+
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        return {"version": version, "data": [], "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
