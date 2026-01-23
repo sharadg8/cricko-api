@@ -452,7 +452,7 @@ async def scrape_table(payload: ScrapeRequest):
     try:
         app_props = raw_json.get('props', {}).get('appPageProps') or raw_json.get('data', {})
         # Cricinfo often nests standigs under content -> standings or groups
-        standings_data = app_props.get('data', {}).get('content', {}).get('standings', {})
+        standings_data = app_props.get('data', {}).get('data', {}).get('content', {}).get('standings', {})
         groups = standings_data.get('groups', [])
 
         if not groups:
