@@ -462,7 +462,7 @@ async def scrape_table(payload: ScrapeRequest):
         formatted_table = {}
 
         for group in groups:
-            group_name = group.get('name', 'Group')
+            group_name = group.get('name', 'Group') or 'Group'
             teams_list = []
             
             for team_row in group.get('teamStats', []):
@@ -476,7 +476,7 @@ async def scrape_table(payload: ScrapeRequest):
                     "lost": team_row.get('matchesLost'),
                     "tied": team_row.get('matchesTied'),
                     "nr": team_row.get('matchesNoResult'),
-                    "points": team_row.get('points'),
+                    "pts": team_row.get('points'),
                     "nrr": team_row.get('nrr'),
                     #"form": team_row.get('form', []) # Last 5 matches e.g. ["W", "L", "W"]
                 }
