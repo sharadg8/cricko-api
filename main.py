@@ -51,7 +51,7 @@ TEAM_META = {
     "Bangladesh": {"abbr": "BAN", "color": "#006a4e"},
     "Ireland": {"abbr": "IRE", "color": "#16a04a"},
     "Italy": {"abbr": "ITA", "color": "#004ba0"},
-    "Scotland": {"abbr": "SCO", "color": "#004b8d"},
+    "Scotland": {"abbr": "SCOT", "color": "#004b8d"},
     "Netherlands": {"abbr": "NED", "color": "#f36c21"},
     "Namibia": {"abbr": "NAM", "color": "#0035ad"},
     "United States of America": {"abbr": "USA", "color": "#002868"},
@@ -407,7 +407,9 @@ async def scrape_teams(payload: ScrapeRequest):
                     p_info = m.get('player') if 'player' in m else m
                     slug = p_info.get('slug')
                     if not slug: continue
-                    if "C" in str(m.get('playerRoleType', '')) or m.get('isCaptain'): captain_slug = slug
+                    pr = str(m.get('playerRoleType', ''))
+                    is_captain = 'C' in pr and 'VC' not in pr
+                    if is_captain or m.get('isCaptain'): captain_slug = slug
                     roles_raw = p_info.get('playingRoles') or p_info.get('playingRole', [])
                     role_str = ", ".join([r.get('name') if isinstance(r, dict) else str(r) for r in (roles_raw if isinstance(roles_raw, list) else [roles_raw])])
                     players.append({"name": p_info.get('longName') or p_info.get('name'), "id": slug, "role": role_str, **({"out": True} if m.get('isWithdrawn') else {})})
