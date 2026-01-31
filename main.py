@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 CACHE = {}
-CACHE_TTL = 60 
+CACHE_TTL = 59 
 
 # Local lookup for abbreviations and colors (HTML hex)
 TEAM_META = {
