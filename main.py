@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 # Standard logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("cric-scraper")
-version = "Cricko v1.0"
+version = "Cricko v1.0.1"
 
 app = FastAPI()
 
@@ -245,7 +245,7 @@ async def scrape_schedule(payload: ScrapeRequest):
 
             venue_name = ground.get('name', 'TBA')
             city_name = ground.get('town', {}).get('name', '')
-            if city_name and venue_name.endsWith(city_name):
+            if city_name and venue_name.endswith(city_name):
                 venue_name = venue_name[:-len(city_name)]
                 venue_name = venue_name.rstrip(", ")
             
@@ -483,10 +483,10 @@ async def scrape_table(payload: ScrapeRequest):
                     "played": team_row.get('matchesPlayed', ''),
                     "won": team_row.get('matchesWon', ''),
                     "lost": team_row.get('matchesLost', ''),
-                    "tied": team_row.get('matchesTied', ''),
+                    "tied": team_row.get('matchesTied') if team_row.get('matchesTied') is not None else '',
                     "nr": team_row.get('matchesNoResult', ''),
                     "pts": team_row.get('points', ''),
-                    "nrr": team_row.get('nrr', ''),
+                    "nrr": team_row.get('nrr') if team_row.get('nrr') is not None else '',
                     #"form": team_row.get('form', []) # Last 5 matches e.g. ["W", "L", "W"]
                 }
                 teams_list.append(stats)
