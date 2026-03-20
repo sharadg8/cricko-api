@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 # Standard logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("cric-scraper")
-version = "Cricko v0.8"
+version = "Cricko v1.0"
 
 app = FastAPI()
 
@@ -477,16 +477,16 @@ async def scrape_table(payload: ScrapeRequest):
             for team_row in group.get('teamStats', []):
                 team_info = team_row.get('teamInfo', {})
                 stats = {
-                    "rank": team_row.get('rank'),
-                    "name": team_info.get('longName'),
-                    "abbr": team_info.get('abbreviation'),
-                    "played": team_row.get('matchesPlayed'),
-                    "won": team_row.get('matchesWon'),
-                    "lost": team_row.get('matchesLost'),
-                    "tied": team_row.get('matchesTied'),
-                    "nr": team_row.get('matchesNoResult'),
-                    "pts": team_row.get('points'),
-                    "nrr": team_row.get('nrr'),
+                    "rank": team_row.get('rank', ''),
+                    "name": team_info.get('longName', ''),
+                    "abbr": team_info.get('abbreviation', ''),
+                    "played": team_row.get('matchesPlayed', ''),
+                    "won": team_row.get('matchesWon', ''),
+                    "lost": team_row.get('matchesLost', ''),
+                    "tied": team_row.get('matchesTied', ''),
+                    "nr": team_row.get('matchesNoResult', ''),
+                    "pts": team_row.get('points', ''),
+                    "nrr": team_row.get('nrr', ''),
                     #"form": team_row.get('form', []) # Last 5 matches e.g. ["W", "L", "W"]
                 }
                 teams_list.append(stats)
