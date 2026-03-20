@@ -242,6 +242,12 @@ async def scrape_schedule(payload: ScrapeRequest):
             away = t2 if home == t1 else t1
             status = (match.get('state') or '').lower()
             ground = match.get('ground') or {}
+
+            venue_name = ground.get('name', 'TBA')
+            city_name = ground.get('town', {}).get('name', '')
+            if city_name and venue_name.endsWith(city_name):
+                venue_name = venue_name[:-len(city_name)]
+                venue_name = venue_name.rstrip(", ")
             
             entry = {
                 "ci": f"{match.get('slug', '')}-{match.get('objectId', '')}",
@@ -253,7 +259,7 @@ async def scrape_schedule(payload: ScrapeRequest):
                     "away": {"abbr": (away.get('team') or {}).get('abbreviation', ''), "name": (away.get('team') or {}).get('longName', 'TBC')},
                     "home": {"abbr": (home.get('team') or {}).get('abbreviation', ''), "name": (home.get('team') or {}).get('longName', 'TBC')}
                 },
-                "venue": {"cc": ground.get('country', {}).get('name', ''), "city": ground.get('town', {}).get('name', ''), "name": ground.get('name', 'TBA')}
+                "venue": {"cc": ground.get('country', {}).get('name', ''), "city": city_name, "name": venue_name}
             }
 
             if status == "post":
